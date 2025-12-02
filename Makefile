@@ -41,10 +41,10 @@ bindata/static/%: resources/% | bindata/static/css
 bindata/static/css/%.css: resources/%.css | bindata/static 
 	cp "$<" "$@"
 
-bindata/static/css/xterm.css: js/node_modules/xterm/css/xterm.css | bindata/static
+bindata/static/css/xterm.css: js/node_modules/@xterm/xterm/css/xterm.css | bindata/static/css
 	cp "$<" "$@"
 
-js/node_modules/xterm/dist/xterm.css:
+js/node_modules/@xterm/xterm/css/xterm.css:
 	cd js && \
 	npm install
 

@@ -1,10 +1,10 @@
-import { IDisposable, Terminal } from "xterm";
-import { FitAddon } from 'xterm-addon-fit';
-import { WebLinksAddon } from 'xterm-addon-web-links';
-import { WebglAddon } from 'xterm-addon-webgl';
+import { IDisposable, Terminal } from "@xterm/xterm";
+import { FitAddon } from '@xterm/addon-fit';
+import { WebLinksAddon } from '@xterm/addon-web-links';
+import { WebglAddon } from '@xterm/addon-webgl';
 import { ZModemAddon } from "./zmodem";
 
-export class OurXterm {
+export class GoTTYXterm {
     // The HTMLElement that contains our terminal
     elem: HTMLElement;
 
@@ -40,6 +40,24 @@ export class OurXterm {
         this.message = elem.ownerDocument.createElement("div");
         this.message.className = "xterm-overlay";
         this.messageTimeout = 2000;
+
+        // Auto-copy selection to clipboard
+        this.term.onSelectionChange(() => {
+            if (this.term.hasSelection()) {
+                const text = this.term.getSelection();
+
+                // Try modern Clipboard API first
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText(text).catch(err => {
+                        console.warn('Clipboard API failed, trying fallback:', err);
+                        this.fallbackCopyToClipboard(text);
+                    });
+                } else {
+                    // Fallback for non-secure contexts
+                    this.fallbackCopyToClipboard(text);
+                }
+            }
+        });
 
         this.resizeListener = () => {
             this.fitAddOn.fit();
@@ -163,4 +181,24 @@ export class OurXterm {
     focus(): void {
         this.term.focus();
     }
+
+    fallbackCopyToClipboard(text: string): void {
+        const textarea = document.createElement('textarea');
+        textarea.value = text;
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.focus();
+        textarea.select();
+
+        try {
+            document.execCommand('copy');
+        } catch (err) {
+            console.warn('Fallback copy failed:', err);
+        }
+
+        document.body.removeChild(textarea);
+    }
 }
+
+export { GoTTYXterm as OurXterm };

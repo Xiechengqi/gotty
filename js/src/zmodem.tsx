@@ -1,5 +1,5 @@
 import { Component, ComponentChildren, createRef, render } from "preact";
-import { ITerminalAddon, Terminal } from "xterm";
+import { ITerminalAddon, Terminal } from "@xterm/xterm";
 import { Browser, Detection, Offer, Sentry, Session } from 'zmodem.js/src/zmodem_browser';
 import { Button, MyModal } from "./MyModal";
 
