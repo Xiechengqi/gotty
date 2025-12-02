@@ -1,7 +1,7 @@
-import { IDisposable, Terminal } from "@xterm/xterm";
-import { FitAddon } from '@xterm/addon-fit';
-import { WebLinksAddon } from '@xterm/addon-web-links';
-import { WebglAddon } from '@xterm/addon-webgl';
+import { IDisposable, Terminal } from "xterm";
+import { FitAddon } from 'xterm-addon-fit';
+import { WebLinksAddon } from 'xterm-addon-web-links';
+import { WebglAddon } from 'xterm-addon-webgl';
 import { ZModemAddon } from "./zmodem";
 
 export class GoTTYXterm {
@@ -48,7 +48,10 @@ export class GoTTYXterm {
 
                 // Try modern Clipboard API first
                 if (navigator.clipboard && navigator.clipboard.writeText) {
-                    navigator.clipboard.writeText(text).catch(err => {
+                    navigator.clipboard.writeText(text).then(() => {
+                        // Keep focus on terminal after copying
+                        this.term.focus();
+                    }).catch(err => {
                         console.warn('Clipboard API failed, trying fallback:', err);
                         this.fallbackCopyToClipboard(text);
                     });
@@ -188,7 +191,6 @@ export class GoTTYXterm {
         textarea.style.position = 'fixed';
         textarea.style.opacity = '0';
         document.body.appendChild(textarea);
-        textarea.focus();
         textarea.select();
 
         try {
@@ -198,6 +200,9 @@ export class GoTTYXterm {
         }
 
         document.body.removeChild(textarea);
+
+        // Restore focus to terminal
+        this.term.focus();
     }
 }
 
