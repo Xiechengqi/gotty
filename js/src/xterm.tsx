@@ -27,7 +27,11 @@ export class GoTTYXterm {
 
     constructor(elem: HTMLElement) {
         this.elem = elem;
-        this.term = new Terminal();
+        this.term = new Terminal({
+            theme: {
+                background: 'rgb(40, 41, 53)'
+            }
+        });
         this.fitAddOn = new FitAddon();
         this.zmodemAddon = new ZModemAddon({
             toTerminal: (x: Uint8Array) => this.term.write(x),
