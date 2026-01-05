@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync/atomic"
 
@@ -237,6 +238,8 @@ func (server *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	lines := []string{
 		"var gotty_term = 'xterm';",
 		"var gotty_ws_query_args = '" + server.options.WSQueryArgs + "';",
+		"var gotty_enable_idle_alert = " + strconv.FormatBool(server.options.EnableIdleAlert) + ";",
+		"var gotty_idle_alert_timeout = " + strconv.Itoa(server.options.IdleAlertTimeout) + ";",
 	}
 
 	w.Write([]byte(strings.Join(lines, "\n")))

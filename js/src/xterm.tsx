@@ -25,6 +25,11 @@ export class GoTTYXterm {
     toServer: (data: string | Uint8Array) => void;
     encoder: TextEncoder
 
+    // 输出/输入回调列表，用于空闲提醒等功能（可解绑）
+    private outputCallbacks: Set<() => void> = new Set();
+    private inputCallbacks: Set<() => void> = new Set();
+    private selectionCallbacks: Set<() => void> = new Set();
+
     constructor(elem: HTMLElement) {
         this.elem = elem;
         this.term = new Terminal({
@@ -47,6 +52,7 @@ export class GoTTYXterm {
 
         // Auto-copy selection to clipboard
         this.term.onSelectionChange(() => {
+            this.selectionCallbacks.forEach((cb) => cb());
             if (this.term.hasSelection()) {
                 const text = this.term.getSelection();
 
@@ -86,7 +92,33 @@ export class GoTTYXterm {
     // This gets called from the Websocket's onReceive handler
     output(data: Uint8Array) {
         this.zmodemAddon.consume(data);
+        // 通知所有输出回调
+        this.outputCallbacks.forEach((cb) => cb());
     };
+
+    // 注册输出回调（返回解绑函数）
+    onOutput(callback: () => void): () => void {
+        this.outputCallbacks.add(callback);
+        return () => {
+            this.outputCallbacks.delete(callback);
+        };
+    }
+
+    // 注册输入回调（返回解绑函数）
+    onInputActivity(callback: () => void): () => void {
+        this.inputCallbacks.add(callback);
+        return () => {
+            this.inputCallbacks.delete(callback);
+        };
+    }
+
+    // 注册选择回调（返回解绑函数）
+    onSelectionActivity(callback: () => void): () => void {
+        this.selectionCallbacks.add(callback);
+        return () => {
+            this.selectionCallbacks.delete(callback);
+        };
+    }
 
     getMessage(): HTMLElement {
         return this.message;
@@ -151,6 +183,7 @@ export class GoTTYXterm {
         }
 
         this.onDataHandler = this.term.onData((input) => {
+            this.inputCallbacks.forEach((cb) => cb());
             this.toServer(this.encoder.encode(input));
         });
     };

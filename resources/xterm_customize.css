@@ -17,3 +17,192 @@
     user-select: none;
     transition: opacity 180ms ease-in;
 }
+
+/* 空闲提醒组件 - 展开状态（固定右上角） */
+.idle-alert {
+    position: fixed;
+    top: 10px;
+    right: 10px;
+    display: flex;
+    align-items: center;
+    background: rgba(40, 41, 53, 0.9);
+    border: 1px solid #555;
+    border-radius: 4px;
+    padding: 4px 8px;
+    z-index: 1000;
+    font-size: 16px;
+    user-select: none;
+}
+
+/* 折叠状态（隐藏到右侧边缘，只露出箭头） */
+.idle-alert-collapsed {
+    position: fixed;
+    top: 50%;
+    right: 0;
+    transform: translateY(-50%);
+    background: rgba(40, 41, 53, 0.8);
+    border: 1px solid #555;
+    border-right: none;
+    border-radius: 4px 0 0 4px;
+    padding: 8px 4px;
+    cursor: pointer;
+    z-index: 1000;
+    color: #888;
+    font-size: 12px;
+    transition: all 0.2s;
+}
+
+.idle-alert-collapsed:hover {
+    background: rgba(60, 61, 73, 0.95);
+    color: #fff;
+    padding-right: 8px;
+}
+
+/* 折叠按钮 */
+.idle-alert-collapse {
+    cursor: pointer;
+    color: #888;
+    margin-right: 8px;
+    font-size: 14px;
+    padding: 2px 4px;
+}
+
+.idle-alert-collapse:hover {
+    color: #fff;
+}
+
+/* 喇叭图标 */
+.idle-alert-icon {
+    cursor: pointer;
+    opacity: 0.6;
+    transition: opacity 0.2s;
+}
+
+.idle-alert-icon:hover {
+    opacity: 1;
+}
+
+.idle-alert-icon.enabled {
+    opacity: 1;
+}
+
+/* 超时输入框 */
+.idle-alert-timeout {
+    width: 72px;
+    margin-right: 8px;
+    background: transparent;
+    border: 1px solid #555;
+    border-radius: 3px;
+    color: #ddd;
+    font-size: 12px;
+    padding: 2px 6px;
+    outline: none;
+}
+
+.idle-alert-timeout:focus {
+    border-color: #888;
+}
+
+.idle-alert-sound-button {
+    background: transparent;
+    border: 1px solid #555;
+    border-radius: 3px;
+    color: #ddd;
+    font-size: 12px;
+    padding: 2px 6px;
+    margin-right: 8px;
+    cursor: pointer;
+    line-height: 1.2;
+}
+
+.idle-alert-sound-button:hover {
+    border-color: #888;
+}
+
+.idle-alert-sound-panel {
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    width: 220px;
+    background: rgba(40, 41, 53, 0.98);
+    border: 1px solid #555;
+    border-radius: 6px;
+    padding: 10px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+    z-index: 1001;
+    font-size: 12px;
+    color: #ddd;
+}
+
+.idle-alert-sound-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.idle-alert-sound-label {
+    width: 40px;
+    color: #bbb;
+}
+
+.idle-alert-sound-slider {
+    flex: 1;
+}
+
+.idle-alert-sound-value {
+    width: 44px;
+    text-align: right;
+    color: #ddd;
+}
+
+.idle-alert-sound-number {
+    width: 92px;
+    background: transparent;
+    border: 1px solid #555;
+    border-radius: 3px;
+    color: #ddd;
+    font-size: 12px;
+    padding: 2px 6px;
+    outline: none;
+}
+
+.idle-alert-sound-number:focus {
+    border-color: #888;
+}
+
+.idle-alert-sound-unit {
+    width: 22px;
+    color: #aaa;
+}
+
+.idle-alert-sound-select {
+    flex: 1;
+    background: transparent;
+    border: 1px solid #555;
+    border-radius: 3px;
+    color: #ddd;
+    font-size: 12px;
+    padding: 2px 6px;
+    outline: none;
+}
+
+.idle-alert-sound-select:focus {
+    border-color: #888;
+}
+
+.idle-alert-sound-test {
+    width: 100%;
+    background: rgba(60, 61, 73, 0.9);
+    border: 1px solid #555;
+    border-radius: 4px;
+    color: #ddd;
+    font-size: 12px;
+    padding: 6px 8px;
+    cursor: pointer;
+}
+
+.idle-alert-sound-test:hover {
+    border-color: #888;
+    background: rgba(80, 81, 93, 0.95);
+}

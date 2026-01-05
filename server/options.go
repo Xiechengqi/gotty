@@ -32,6 +32,8 @@ type Options struct {
 	WSOrigin            string `hcl:"ws_origin" flagName:"ws-origin" flagDescribe:"A regular expression that matches origin URLs to be accepted by WebSocket. No cross origin requests are acceptable by default" default:""`
 	WSQueryArgs         string `hcl:"ws_query_args" flagName:"ws-query-args" flagDescribe:"Querystring arguments to append to the websocket instantiation" default:""`
 	EnableWebGL         bool   `hcl:"enable_webgl" flagName:"enable-webgl" flagDescribe:"Enable WebGL renderer" default:"true"`
+	EnableIdleAlert     bool   `hcl:"enable_idle_alert" flagName:"enable-idle-alert" flagDescribe:"Enable idle alert feature (show speaker icon)" default:"false"`
+	IdleAlertTimeout    int    `hcl:"idle_alert_timeout" flagName:"idle-alert-timeout" flagDescribe:"Idle alert timeout in seconds" default:"30"`
 	Quiet               bool   `hcl:"quiet" flagName:"quiet" flagDescribe:"Don't log" default:"false"`
 
 	TitleVariables map[string]interface{}
@@ -40,6 +42,9 @@ type Options struct {
 func (options *Options) Validate() error {
 	if options.EnableTLSClientAuth && !options.EnableTLS {
 		return errors.New("TLS client authentication is enabled, but TLS is not enabled")
+	}
+	if options.EnableIdleAlert && options.IdleAlertTimeout <= 0 {
+		return errors.New("idle alert is enabled, but idle-alert-timeout must be > 0")
 	}
 	return nil
 }
