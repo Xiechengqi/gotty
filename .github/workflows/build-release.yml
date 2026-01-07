@@ -1,0 +1,144 @@
+name: Build and Release
+
+on:
+  push:
+    branches:
+      - master
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - os: linux
+            arch: amd64
+          - os: linux
+            arch: arm64
+          - os: darwin
+            arch: amd64
+          - os: darwin
+            arch: arm64
+          - os: windows
+            arch: amd64
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Build gotty binary for ${{ matrix.os }}-${{ matrix.arch }}
+        run: |
+          VERSION=$(git describe --tags --always 2>/dev/null || echo "latest")
+          GOOS=${{ matrix.os }} GOARCH=${{ matrix.arch }} CGO_ENABLED=0 go build \
+            -ldflags "-X main.Version=${VERSION}" \
+            -trimpath \
+            -o gotty-${{ matrix.os }}-${{ matrix.arch }} .
+
+      - name: Prepare release asset
+        run: |
+          if [ "${{ matrix.os }}" = "windows" ]; then
+            mv gotty-${{ matrix.os }}-${{ matrix.arch }} gotty-${{ matrix.os }}-${{ matrix.arch }}.exe
+          fi
+          echo "RELEASE_ASSET=gotty-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.os == 'windows' && '.exe' || '' }}" >> $GITHUB_ENV
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: gotty-${{ matrix.os }}-${{ matrix.arch }}
+          path: ${{ env.RELEASE_ASSET }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Prepare release files
+        run: |
+          mkdir -p release-files
+          cp artifacts/*/* release-files/ 2>/dev/null || true
+          ls -lh release-files/
+
+      - name: Get version
+        id: version
+        run: |
+          VERSION=$(git describe --tags --always 2>/dev/null || echo "latest")
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "Current version: ${VERSION}"
+
+      - name: Delete existing latest release and tag
+        run: |
+          gh release delete latest --yes || true
+          git push origin :refs/tags/latest || true
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Create latest tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -f latest
+          git push -f origin latest
+
+      - name: Create or Update Latest Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: "Latest Build (v${{ steps.version.outputs.version }})"
+          body: |
+            ## 最新自动构建版本
+
+            **版本**: ${{ steps.version.outputs.version }}
+            **提交**: ${{ github.sha }}
+            **分支**: ${{ github.ref_name }}
+            **构建时间**: ${{ github.event.head_commit.timestamp }}
+
+            ### 变更内容
+
+            ${{ github.event.head_commit.message }}
+
+            ---
+
+            ### 下载
+
+            - **Linux AMD64**: `gotty-linux-amd64`
+            - **Linux ARM64**: `gotty-linux-arm64`
+            - **macOS AMD64**: `gotty-darwin-amd64`
+            - **macOS ARM64**: `gotty-darwin-arm64`
+            - **Windows AMD64**: `gotty-windows-amd64.exe`
+
+            ### 快速安装
+
+            ```bash
+            # Linux AMD64
+            wget https://github.com/${{ github.repository }}/releases/download/latest/gotty-linux-amd64 -O gotty && chmod +x gotty
+
+            # Linux ARM64
+            wget https://github.com/${{ github.repository }}/releases/download/latest/gotty-linux-arm64 -O gotty && chmod +x gotty
+
+            # macOS AMD64
+            curl -Lo gotty https://github.com/${{ github.repository }}/releases/download/latest/gotty-darwin-amd64 && chmod +x gotty
+
+            # macOS ARM64
+            curl -Lo gotty https://github.com/${{ github.repository }}/releases/download/latest/gotty-darwin-arm64 && chmod +x gotty
+
+            # Windows
+            # 下载 gotty-windows-amd64.exe
+            ```
+          files: release-files/*
+          prerelease: false
+          draft: false
