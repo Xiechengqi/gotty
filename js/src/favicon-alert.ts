@@ -72,8 +72,17 @@ export function installFaviconAlert(options: FaviconAlertOptions): () => void {
 
     let isActive = false;
     let needsAttention = false;
+    let sawNonViewingActive = false;
     let stopTimerId: number | null = null;
     let stopDeadlineMs: number | null = null;
+
+    let leaveDebounceUntilMs: number | null = null;
+    let leaveDebounceTimerId: number | null = null;
+
+    const isInLeaveDebounce = () =>
+        !isViewing &&
+        leaveDebounceUntilMs !== null &&
+        Date.now() < leaveDebounceUntilMs;
 
     const setColor = (color: FaviconColor) => {
         if (lastColor === color) return;
@@ -102,12 +111,13 @@ export function installFaviconAlert(options: FaviconAlertOptions): () => void {
     };
 
     const render = () => {
-        if (isActive) {
-            setColor('yellow');
+        if (isViewing || isInLeaveDebounce()) {
+            setColor('red');
             return;
         }
-        if (isViewing) {
-            setColor('red');
+        if (isActive) {
+            sawNonViewingActive = true;
+            setColor('yellow');
             return;
         }
         setColor(needsAttention ? 'green' : 'gray');
@@ -127,13 +137,15 @@ export function installFaviconAlert(options: FaviconAlertOptions): () => void {
         if (!isActive) return;
 
         isActive = false;
-        if (!isViewing) {
+        if (!isViewing && !isInLeaveDebounce() && sawNonViewingActive) {
             needsAttention = true;
         }
         render();
     };
 
     const handleActivity = () => {
+        if (isViewing || isInLeaveDebounce()) return;
+
         stopDeadlineMs = Date.now() + stopTimeoutMs;
 
         if (!isActive) {
@@ -151,9 +163,37 @@ export function installFaviconAlert(options: FaviconAlertOptions): () => void {
         if (nextIsViewing === isViewing) return;
 
         isViewing = nextIsViewing;
-        if (isViewing) {
-            needsAttention = false;
+        if (leaveDebounceTimerId !== null) {
+            window.clearTimeout(leaveDebounceTimerId);
+            leaveDebounceTimerId = null;
         }
+
+        if (isViewing) {
+            leaveDebounceUntilMs = null;
+            needsAttention = false;
+            sawNonViewingActive = false;
+            isActive = false;
+            stopDeadlineMs = null;
+            if (stopTimerId !== null) {
+                window.clearTimeout(stopTimerId);
+                stopTimerId = null;
+            }
+            render();
+            return;
+        }
+
+        leaveDebounceUntilMs = Date.now() + 1000;
+        isActive = false;
+        stopDeadlineMs = null;
+        sawNonViewingActive = false;
+        if (stopTimerId !== null) {
+            window.clearTimeout(stopTimerId);
+            stopTimerId = null;
+        }
+        leaveDebounceTimerId = window.setTimeout(() => {
+            leaveDebounceTimerId = null;
+            render();
+        }, Math.max(0, leaveDebounceUntilMs - Date.now()));
         render();
     };
 
@@ -184,6 +224,11 @@ export function installFaviconAlert(options: FaviconAlertOptions): () => void {
             window.clearTimeout(stopTimerId);
             stopTimerId = null;
         }
+        if (leaveDebounceTimerId !== null) {
+            window.clearTimeout(leaveDebounceTimerId);
+            leaveDebounceTimerId = null;
+        }
         stopDeadlineMs = null;
+        leaveDebounceUntilMs = null;
     };
 }
