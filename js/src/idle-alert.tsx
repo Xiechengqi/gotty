@@ -9,7 +9,6 @@ interface IdleAlertState {
     enabled: boolean;
     collapsed: boolean;
     timeoutSeconds: number;
-    soundEnabled: boolean;
     soundVolume: number;
     soundFrequencyHz: number;
     soundDurationMs: number;
@@ -41,7 +40,6 @@ export class IdleAlert extends Component<IdleAlertProps, IdleAlertState> {
         const storedEnabled = this.readBool('enabled');
         const storedCollapsed = this.readBool('collapsed');
         const storedTimeoutSeconds = this.readNumber('timeoutSeconds');
-        const storedSoundEnabled = this.readBool('sound.enabled');
         const storedSoundVolume = this.readNumber('sound.volume');
         const storedSoundFrequencyHz = this.readNumber('sound.frequencyHz');
         const storedSoundDurationMs = this.readNumber('sound.durationMs');
@@ -57,7 +55,6 @@ export class IdleAlert extends Component<IdleAlertProps, IdleAlertState> {
             enabled: storedEnabled ?? false,
             collapsed: storedCollapsed ?? false,
             timeoutSeconds: initialTimeout,
-            soundEnabled: storedSoundEnabled ?? true,
             soundVolume: this.clampSoundVolume(typeof storedSoundVolume === 'number' ? storedSoundVolume : 0.3),
             soundFrequencyHz: this.clampSoundFrequencyHz(
                 typeof storedSoundFrequencyHz === 'number' ? storedSoundFrequencyHz : 800
@@ -182,13 +179,12 @@ export class IdleAlert extends Component<IdleAlertProps, IdleAlertState> {
         }
     }
 
-    private async playBeep(force: boolean = false) {
+    private async playBeep() {
         try {
             if (!this.audioContext || this.audioContext.state === 'closed') {
                 await this.prepareAudioContext();
             }
             if (!this.audioContext) return;
-            if (!force && !this.state.soundEnabled) return;
 
             const oscillator = this.audioContext.createOscillator();
             const gainNode = this.audioContext.createGain();
@@ -220,7 +216,7 @@ export class IdleAlert extends Component<IdleAlertProps, IdleAlertState> {
     private async testBeep() {
         this.handleActivity();
         await this.prepareAudioContext();
-        await this.playBeep(true);
+        await this.playBeep();
     }
 
     private clampTimeoutSeconds(value: number): number {
@@ -315,13 +311,6 @@ export class IdleAlert extends Component<IdleAlertProps, IdleAlertState> {
         });
     }
 
-    private setSoundEnabled(nextValue: boolean) {
-        this.handleActivity();
-        this.setState({ soundEnabled: nextValue }, () => {
-            this.writeBool('sound.enabled', this.state.soundEnabled);
-        });
-    }
-
     private setSoundVolume(nextValue: number) {
         this.handleActivity();
         const clamped = this.clampSoundVolume(nextValue);
@@ -368,7 +357,6 @@ export class IdleAlert extends Component<IdleAlertProps, IdleAlertState> {
             collapsed,
             timeoutSeconds,
             showSoundSettings,
-            soundEnabled,
             soundVolume,
             soundFrequencyHz,
             soundDurationMs,
@@ -394,21 +382,11 @@ export class IdleAlert extends Component<IdleAlertProps, IdleAlertState> {
                       title="折叠到侧边">
                     &#8250;
                 </span>
-                <input
-                    class="idle-alert-timeout"
-                    type="number"
-                    min={MIN_TIMEOUT_SECONDS}
-                    max={MAX_TIMEOUT_SECONDS}
-                    step={1}
-                    value={timeoutSeconds}
-                    onInput={(e) => this.setTimeoutSeconds(Number((e.currentTarget as HTMLInputElement).value))}
-                    title={`超时秒数（${MIN_TIMEOUT_SECONDS}-${MAX_TIMEOUT_SECONDS}）`}
-                />
                 <button
                     class="idle-alert-sound-button"
                     type="button"
                     onClick={this.toggleSoundSettings}
-                    title="声音设置"
+                    title="设置"
                 >
                     ⚙
                 </button>
@@ -420,12 +398,17 @@ export class IdleAlert extends Component<IdleAlertProps, IdleAlertState> {
                 {showSoundSettings && (
                     <div class="idle-alert-sound-panel">
                         <label class="idle-alert-sound-row">
+                            <span class="idle-alert-sound-label">间隔</span>
                             <input
-                                type="checkbox"
-                                checked={soundEnabled}
-                                onChange={(e) => this.setSoundEnabled((e.currentTarget as HTMLInputElement).checked)}
+                                class="idle-alert-sound-number"
+                                type="number"
+                                min={MIN_TIMEOUT_SECONDS}
+                                max={MAX_TIMEOUT_SECONDS}
+                                step={1}
+                                value={timeoutSeconds}
+                                onInput={(e) => this.setTimeoutSeconds(Number((e.currentTarget as HTMLInputElement).value))}
                             />
-                            <span class="idle-alert-sound-label">声音</span>
+                            <span class="idle-alert-sound-unit">秒</span>
                         </label>
                         <label class="idle-alert-sound-row">
                             <span class="idle-alert-sound-label">音量</span>
