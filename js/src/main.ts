@@ -2,6 +2,7 @@ import { ConnectionFactory } from "./websocket";
 import { WebTTY, protocols } from "./webtty";
 import { OurXterm } from "./xterm";
 import { createIdleAlert } from "./idle-alert";
+import { installFaviconAlert } from "./favicon-alert";
 
 // @TODO remove these
 declare var gotty_auth_token: string;
@@ -16,38 +17,45 @@ if (elem !== null) {
     var term: OurXterm;
     term = new OurXterm(elem);
 
+    const subscribeTermActivity = (cb: () => void) => {
+        const unsubOutput = term.onOutput(cb);
+        const unsubInput = term.onInputActivity(cb);
+        const unsubSelection = term.onSelectionActivity(cb);
+
+        const onWheel = () => cb();
+        const onKeydown = () => cb();
+        term.elem.addEventListener('wheel', onWheel, { passive: true });
+        term.elem.addEventListener('keydown', onKeydown, true);
+
+        return () => {
+            unsubOutput();
+            unsubInput();
+            unsubSelection();
+            term.elem.removeEventListener('wheel', onWheel);
+            term.elem.removeEventListener('keydown', onKeydown, true);
+        };
+    };
+
+    const timeoutSeconds =
+        (typeof gotty_idle_alert_timeout === 'number' && gotty_idle_alert_timeout > 0)
+            ? gotty_idle_alert_timeout
+            : 30;
+
+    const uninstallFaviconAlert = installFaviconAlert({
+        stopTimeoutMs: timeoutSeconds * 1000,
+        onActivity: subscribeTermActivity,
+    });
+
     // 如果启用了空闲提醒功能，创建组件
     if (typeof gotty_enable_idle_alert !== 'undefined' && gotty_enable_idle_alert) {
         const alertContainer = document.createElement('div');
         alertContainer.id = 'idle-alert-container';
         document.body.appendChild(alertContainer);
 
-        const timeoutSeconds =
-            (typeof gotty_idle_alert_timeout === 'number' && gotty_idle_alert_timeout > 0)
-                ? gotty_idle_alert_timeout
-                : 30;
-
         createIdleAlert(
             alertContainer,
             timeoutSeconds,
-            (cb) => {
-                const unsubOutput = term.onOutput(cb);
-                const unsubInput = term.onInputActivity(cb);
-                const unsubSelection = term.onSelectionActivity(cb);
-
-                const onWheel = () => cb();
-                const onKeydown = () => cb();
-                term.elem.addEventListener('wheel', onWheel, { passive: true });
-                term.elem.addEventListener('keydown', onKeydown, true);
-
-                return () => {
-                    unsubOutput();
-                    unsubInput();
-                    unsubSelection();
-                    term.elem.removeEventListener('wheel', onWheel);
-                    term.elem.removeEventListener('keydown', onKeydown, true);
-                };
-            }
+            subscribeTermActivity
         );
     }
 
@@ -63,6 +71,7 @@ if (elem !== null) {
     // this event is unreliable and in some cases (Firefox is mentioned), having an
     // "unload" event handler can have unwanted side effects. Consider commenting it out.
     window.addEventListener("unload", () => {
+        uninstallFaviconAlert();
         closer();
         term.close();
     });
