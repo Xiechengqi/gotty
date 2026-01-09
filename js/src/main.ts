@@ -41,7 +41,7 @@ if (elem !== null) {
             ? gotty_idle_alert_timeout
             : 30;
 
-    const faviconStopTimeoutMs = 3000;
+    const faviconStopTimeoutMs = 6000;
     const uninstallFaviconAlert = installFaviconAlert({
         stopTimeoutMs: faviconStopTimeoutMs,
         onActivity: subscribeTermActivity,
