@@ -42,6 +42,10 @@ html, body, #terminal {
   cursor: not-allowed;
 }
 
+.gotty-voice-btn--disabled {
+  opacity: 0.55;
+}
+
 .gotty-voice-btn--active {
   background: rgba(220, 38, 38, 0.35);
   border-color: rgba(220, 38, 38, 0.55);

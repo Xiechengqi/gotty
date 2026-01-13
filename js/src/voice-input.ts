@@ -126,8 +126,15 @@ export class VoiceInput {
         }
 
         this.button.style.display = '';
-        const disabled = !this.permitWrite || !this.isMicAvailable();
-        this.button.disabled = disabled;
+        this.button.disabled = false;
+        this.button.classList.toggle('gotty-voice-btn--disabled', !this.permitWrite || !this.canAccessMicFromHere());
+        if (!this.permitWrite) {
+            this.button.title = '语音输入不可用：gotty 需要 --permit-write';
+        } else if (!this.canAccessMicFromHere()) {
+            this.button.title = '语音输入不可用：需要 HTTPS（或 localhost）才能访问麦克风';
+        } else {
+            this.button.title = '语音输入（点击开始/停止；按住右 Shift 开始，松开停止）';
+        }
 
         if (this.recording) {
             this.button.classList.add('gotty-voice-btn--active');
@@ -218,7 +225,7 @@ export class VoiceInput {
         }
     }
 
-    private isMicAvailable(): boolean {
+    private canAccessMicFromHere(): boolean {
         if (!navigator.mediaDevices?.getUserMedia) return false;
         if (window.isSecureContext) return true;
         return window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
@@ -238,7 +245,11 @@ export class VoiceInput {
             return;
         }
         if (this.recording) return;
-        if (!this.isMicAvailable()) {
+        if (!navigator.mediaDevices?.getUserMedia) {
+            this.term.showMessage("语音输入不可用：浏览器不支持麦克风接口（getUserMedia）", 2500);
+            return;
+        }
+        if (!this.canAccessMicFromHere()) {
             this.term.showMessage("语音输入需要 HTTPS（或 localhost）才能访问麦克风", 2500);
             return;
         }
