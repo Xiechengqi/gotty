@@ -34,6 +34,8 @@ export class VoiceInput {
     private startMode: StartMode = 'button';
 
     private ws: WebSocket | null = null;
+    private sessionSeq: number = 0;
+    private activeSession: number = 0;
 
     private audioCtx: AudioContext | null = null;
     private recorder: ScriptProcessorNode | null = null;
@@ -48,6 +50,8 @@ export class VoiceInput {
     private encoder: TextEncoder = new TextEncoder();
 
     private termFocused: boolean = false;
+
+    private postStopMessage: { text: string; timeout: number } | null = null;
 
     constructor(opts: VoiceInputOptions) {
         this.term = opts.term;
@@ -219,11 +223,69 @@ export class VoiceInput {
         return window.isSecureContext && typeof navigator.mediaDevices?.getUserMedia === 'function';
     }
 
+    private isCurrentSession(session: number, ws?: WebSocket): boolean {
+        if (session !== this.activeSession) return false;
+        if (!this.recording) return false;
+        if (ws && this.ws !== ws) return false;
+        return true;
+    }
+
+    private waitForWsOpen(ws: WebSocket, timeoutMs: number, setDidOpen: () => void): Promise<void> {
+        return new Promise<void>((resolve, reject) => {
+            const timeout = window.setTimeout(() => {
+                cleanup();
+                reject(new Error("ASR websocket connect timeout"));
+            }, timeoutMs);
+
+            const onOpen = () => {
+                setDidOpen();
+                cleanup();
+                resolve();
+            };
+            const onError = () => {
+                cleanup();
+                reject(new Error("ASR websocket error during connect"));
+            };
+            const onClose = (ev: CloseEvent) => {
+                cleanup();
+                const reason = ev.reason ? ` reason=${ev.reason}` : "";
+                reject(new Error(`ASR websocket closed during connect (code=${ev.code}${reason})`));
+            };
+
+            const cleanup = () => {
+                window.clearTimeout(timeout);
+                ws.removeEventListener('open', onOpen);
+                ws.removeEventListener('error', onError);
+                ws.removeEventListener('close', onClose);
+            };
+
+            ws.addEventListener('open', onOpen);
+            ws.addEventListener('error', onError);
+            ws.addEventListener('close', onClose);
+        });
+    }
+
+    private formatStartError(e: unknown): string {
+        const err = e as { name?: unknown; message?: unknown };
+        const name = typeof err?.name === 'string' ? err.name : '';
+        if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
+            return "无法开始语音输入：麦克风权限被拒绝";
+        }
+        if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
+            return "无法开始语音输入：未检测到麦克风设备";
+        }
+        if (name === 'NotReadableError' || name === 'TrackStartError') {
+            return "无法开始语音输入：麦克风被占用或不可用";
+        }
+        return "无法开始语音输入：连接 ASR 服务失败";
+    }
+
     private buildAsrWsUrl(): string {
         const httpsEnabled = window.location.protocol === "https:";
         const proto = httpsEnabled ? 'wss://' : 'ws://';
         const queryArgs = (typeof gotty_ws_query_args === 'string' && gotty_ws_query_args !== "") ? "?" + gotty_ws_query_args : "";
-        return proto + window.location.host + window.location.pathname + 'asr/ws' + queryArgs;
+        const basePath = window.location.pathname.endsWith('/') ? window.location.pathname : window.location.pathname + '/';
+        return proto + window.location.host + basePath + 'asr/ws' + queryArgs;
     }
 
     private async start(mode: StartMode) {
@@ -239,6 +301,8 @@ export class VoiceInput {
             return;
         }
 
+        const session = ++this.sessionSeq;
+        this.activeSession = session;
         this.startMode = mode;
         this.recording = true;
         this.captureEnabled = true;
@@ -253,7 +317,11 @@ export class VoiceInput {
             ws.binaryType = 'arraybuffer';
             this.ws = ws;
 
-            ws.addEventListener('message', (event: MessageEvent) => {
+            let didOpen = false;
+            const setDidOpen = () => { didOpen = true; };
+
+            ws.onmessage = (event: MessageEvent) => {
+                if (this.ws !== ws) return;
                 try {
                     const message = JSON.parse(event.data);
                     const segment = Number(message.segment);
@@ -268,39 +336,47 @@ export class VoiceInput {
                     }
                 } catch (_) {
                 }
-            });
+            };
 
-            ws.addEventListener('close', () => {
+            ws.onclose = (ev: CloseEvent) => {
+                if (this.ws !== ws) return;
                 if (this.stopFinalizeTimer !== null) {
                     window.clearTimeout(this.stopFinalizeTimer);
                 }
+                if (this.captureEnabled && didOpen) {
+                    const reason = ev.reason ? `（${ev.reason}）` : "";
+                    this.postStopMessage = { text: `语音输入连接已断开${reason}`, timeout: 2000 };
+                }
                 this.finalizeStop();
-            });
+            };
 
-            ws.addEventListener('error', () => {
-                this.term.showMessage("语音输入连接失败", 2000);
+            ws.onerror = () => {
+                if (this.ws !== ws) return;
+                if (!didOpen) return; // connect phase is handled by waitForWsOpen()
+                this.postStopMessage = { text: "语音输入连接失败", timeout: 2000 };
                 this.finalizeStop(true);
-            });
+            };
 
-            await new Promise<void>((resolve, reject) => {
-                const timeout = window.setTimeout(() => {
-                    reject(new Error("ASR websocket connect timeout"));
-                }, 5000);
-                ws.addEventListener('open', () => {
-                    window.clearTimeout(timeout);
-                    resolve();
-                }, { once: true });
-                ws.addEventListener('close', () => {
-                    window.clearTimeout(timeout);
-                    reject(new Error("ASR websocket closed before open"));
-                }, { once: true });
-            });
+            await this.waitForWsOpen(ws, 5000, setDidOpen);
+            if (!this.isCurrentSession(session, ws)) {
+                try { ws.close(); } catch (_) { }
+                return;
+            }
 
             ws.send(JSON.stringify({ AuthToken: this.authToken, Arguments: "" }));
 
             await this.startAudioCapture();
+            if (!this.isCurrentSession(session, ws)) {
+                this.cleanupAudio();
+                try { ws.close(); } catch (_) { }
+                return;
+            }
         } catch (e) {
-            this.term.showMessage("无法开始语音输入：" + String(e), 2500);
+            if (!this.isCurrentSession(session)) {
+                return;
+            }
+            console.warn("voice input start failed:", e);
+            this.postStopMessage = { text: this.formatStartError(e), timeout: 2500 };
             this.finalizeStop(true);
         }
     }
@@ -334,6 +410,14 @@ export class VoiceInput {
         if (!this.recording) return;
         this.cancelHold();
 
+        if (!this.ws || this.ws.readyState === WebSocket.CONNECTING) {
+            this.captureEnabled = false;
+            this.cleanupAudio();
+            this.cleanupWs();
+            this.finalizeStop(true);
+            return;
+        }
+
         this.captureEnabled = false;
         this.cleanupAudio();
 
@@ -354,7 +438,10 @@ export class VoiceInput {
         if (!this.recording) return;
 
         this.recording = false;
+        this.activeSession = 0;
         this.captureEnabled = false;
+        const postStopMessage = this.postStopMessage;
+        this.postStopMessage = null;
         if (this.stopFinalizeTimer !== null) {
             window.clearTimeout(this.stopFinalizeTimer);
             this.stopFinalizeTimer = null;
@@ -375,6 +462,10 @@ export class VoiceInput {
         this.cleanupAudio();
         this.cleanupWs();
         this.updateUI();
+
+        if (postStopMessage) {
+            this.term.showMessage(postStopMessage.text, postStopMessage.timeout);
+        }
     }
 
     private cleanupWs() {
@@ -383,7 +474,7 @@ export class VoiceInput {
                 this.ws.onmessage = null;
                 this.ws.onclose = null;
                 this.ws.onerror = null;
-                if (this.ws.readyState === WebSocket.OPEN) {
+                if (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING) {
                     this.ws.close();
                 }
             } catch (_) {

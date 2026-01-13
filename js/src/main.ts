@@ -67,7 +67,8 @@ if (elem !== null) {
 
     const httpsEnabled = window.location.protocol == "https:";
     const queryArgs = (gotty_ws_query_args === "") ? "" : "?" + gotty_ws_query_args;
-    const url = (httpsEnabled ? 'wss://' : 'ws://') + window.location.host + window.location.pathname + 'ws' + queryArgs;
+    const basePath = window.location.pathname.endsWith('/') ? window.location.pathname : window.location.pathname + '/';
+    const url = (httpsEnabled ? 'wss://' : 'ws://') + window.location.host + basePath + 'ws' + queryArgs;
     const args = window.location.search;
     const factory = new ConnectionFactory(url, protocols);
     const wt = new WebTTY(term, factory, args, gotty_auth_token);

@@ -36,13 +36,22 @@ func (server *Server) generateHandleASRWS(ctx context.Context) http.HandlerFunc 
 		defer clientConn.Close()
 
 		if err := server.authenticateASRWS(clientConn); err != nil {
-			_ = clientConn.WriteMessage(websocket.TextMessage, []byte(err.Error()))
+			_ = clientConn.WriteControl(
+				websocket.CloseMessage,
+				websocket.FormatCloseMessage(websocket.ClosePolicyViolation, err.Error()),
+				time.Now().Add(1*time.Second),
+			)
 			return
 		}
 
 		backendConn, _, err := websocket.DefaultDialer.Dial(server.options.ASRBackend, nil)
 		if err != nil {
 			log.Printf("ASR backend dial failed: %v", err)
+			_ = clientConn.WriteControl(
+				websocket.CloseMessage,
+				websocket.FormatCloseMessage(websocket.CloseTryAgainLater, "ASR backend unavailable"),
+				time.Now().Add(1*time.Second),
+			)
 			return
 		}
 		defer backendConn.Close()
