@@ -3,13 +3,18 @@ import { WebTTY, protocols } from "./webtty";
 import { OurXterm } from "./xterm";
 import { createIdleAlert } from "./idle-alert";
 import { installFaviconAlert } from "./favicon-alert";
+import { VoiceInput } from "./voice-input";
 
 // @TODO remove these
 declare var gotty_auth_token: string;
 declare var gotty_term: string;
 declare var gotty_ws_query_args: string;
+declare var gotty_permit_write: boolean;
 declare var gotty_enable_idle_alert: boolean;
 declare var gotty_idle_alert_timeout: number;
+declare var gotty_enable_asr: boolean;
+declare var gotty_asr_hold_ms: number;
+declare var gotty_asr_hotkey: string;
 
 const elem = document.getElementById("terminal")
 
@@ -68,11 +73,24 @@ if (elem !== null) {
     const wt = new WebTTY(term, factory, args, gotty_auth_token);
     const closer = wt.open();
 
+    let voiceInput: VoiceInput | null = null;
+    if (typeof gotty_enable_asr !== 'undefined' && gotty_enable_asr) {
+        voiceInput = new VoiceInput({
+            term,
+            authToken: gotty_auth_token,
+            enabled: gotty_enable_asr,
+            permitWrite: typeof gotty_permit_write !== 'undefined' ? gotty_permit_write : false,
+            holdMs: (typeof gotty_asr_hold_ms === 'number' && gotty_asr_hold_ms >= 0) ? gotty_asr_hold_ms : 500,
+            hotkeyCode: (typeof gotty_asr_hotkey === 'string' && gotty_asr_hotkey) ? gotty_asr_hotkey : 'ShiftRight',
+        });
+    }
+
     // According to https://developer.mozilla.org/en-US/docs/Web/API/Window/unload_event
     // this event is unreliable and in some cases (Firefox is mentioned), having an
     // "unload" event handler can have unwanted side effects. Consider commenting it out.
     window.addEventListener("unload", () => {
         uninstallFaviconAlert();
+        voiceInput?.close();
         closer();
         term.close();
     });

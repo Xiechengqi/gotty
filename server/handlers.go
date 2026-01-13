@@ -238,8 +238,12 @@ func (server *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	lines := []string{
 		"var gotty_term = 'xterm';",
 		"var gotty_ws_query_args = '" + server.options.WSQueryArgs + "';",
+		"var gotty_permit_write = " + strconv.FormatBool(server.options.PermitWrite) + ";",
 		"var gotty_enable_idle_alert = " + strconv.FormatBool(server.options.EnableIdleAlert) + ";",
 		"var gotty_idle_alert_timeout = " + strconv.Itoa(server.options.IdleAlertTimeout) + ";",
+		"var gotty_enable_asr = " + strconv.FormatBool(server.options.EnableASR) + ";",
+		"var gotty_asr_hold_ms = " + strconv.Itoa(server.options.ASRHoldMs) + ";",
+		"var gotty_asr_hotkey = '" + server.options.ASRHotkey + "';",
 	}
 
 	w.Write([]byte(strings.Join(lines, "\n")))

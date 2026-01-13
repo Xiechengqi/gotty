@@ -6,8 +6,48 @@ html, body, #terminal {
     margin: 0%;
 }
 
+#terminal {
+  position: relative;
+}
+
 .progress .progress-bar {
   transition: unset;
   transition-duration: 0.1s;
   transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.gotty-voice-btn {
+  position: absolute;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(0, 0, 0, 0.25);
+  color: rgba(255, 255, 255, 0.85);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+  cursor: pointer;
+  user-select: none;
+  backdrop-filter: blur(6px);
+}
+
+.gotty-voice-btn:hover {
+  background: rgba(0, 0, 0, 0.35);
+}
+
+.gotty-voice-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.gotty-voice-btn--active {
+  background: rgba(220, 38, 38, 0.35);
+  border-color: rgba(220, 38, 38, 0.55);
+}
+
+.gotty-voice-btn--fallback {
+  right: 16px;
+  bottom: 16px;
 }

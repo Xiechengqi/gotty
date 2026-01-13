@@ -230,6 +230,7 @@ func (server *Server) setupHandlers(ctx context.Context, cancel context.CancelFu
 	wsMux := http.NewServeMux()
 	wsMux.Handle("/", siteHandler)
 	wsMux.HandleFunc(pathPrefix+"ws", server.generateHandleWS(ctx, cancel, counter))
+	wsMux.HandleFunc(pathPrefix+"asr/ws", server.generateHandleASRWS(ctx))
 	siteHandler = http.Handler(wsMux)
 
 	return siteHandler

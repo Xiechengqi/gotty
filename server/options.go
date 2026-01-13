@@ -36,6 +36,11 @@ type Options struct {
 	IdleAlertTimeout    int    `hcl:"idle_alert_timeout" flagName:"idle-alert-timeout" flagDescribe:"Idle alert timeout in seconds" default:"30"`
 	Quiet               bool   `hcl:"quiet" flagName:"quiet" flagDescribe:"Don't log" default:"false"`
 
+	EnableASR  bool   `hcl:"enable_asr" flagName:"enable-asr" flagDescribe:"Enable voice input UI and ASR proxy endpoint" default:"false"`
+	ASRBackend string `hcl:"asr_backend" flagName:"asr-backend" flagDescribe:"WebSocket address of sherpa-onnx streaming_server (e.g. ws://127.0.0.1:6006)" default:"ws://127.0.0.1:6006"`
+	ASRHoldMs  int    `hcl:"asr_hold_ms" flagName:"asr-hold-ms" flagDescribe:"Hold duration (ms) for ASR hotkey to start recording" default:"500"`
+	ASRHotkey  string `hcl:"asr_hotkey" flagName:"asr-hotkey" flagDescribe:"KeyboardEvent.code for ASR hold-to-talk hotkey" default:"ShiftRight"`
+
 	TitleVariables map[string]interface{}
 }
 
@@ -45,6 +50,9 @@ func (options *Options) Validate() error {
 	}
 	if options.EnableIdleAlert && options.IdleAlertTimeout <= 0 {
 		return errors.New("idle alert is enabled, but idle-alert-timeout must be > 0")
+	}
+	if options.EnableASR && options.ASRHoldMs < 0 {
+		return errors.New("enable-asr is enabled, but asr-hold-ms must be >= 0")
 	}
 	return nil
 }
