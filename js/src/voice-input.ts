@@ -142,19 +142,9 @@ export class VoiceInput {
             this.button.classList.remove('gotty-voice-btn--active');
         }
 
-        const anchor = this.term.getCursorAnchor();
-        if (!anchor) {
-            this.button.classList.add('gotty-voice-btn--fallback');
-            this.button.style.left = '';
-            this.button.style.top = '';
-            return;
-        }
-
-        this.button.classList.remove('gotty-voice-btn--fallback');
-        const offsetX = 6;
-        const offsetY = Math.max(0, Math.floor((anchor.height - 28) / 2));
-        this.button.style.left = `${anchor.left + offsetX}px`;
-        this.button.style.top = `${anchor.top + offsetY}px`;
+        this.button.classList.add('gotty-voice-btn--fallback');
+        this.button.style.left = '';
+        this.button.style.top = '';
     }
 
     private onKeyDownCapture = (ev: KeyboardEvent) => {
@@ -374,7 +364,7 @@ export class VoiceInput {
             .sort((a, b) => a[0] - b[0])
             .map(([, t]) => (t ?? "").trim())
             .filter((t) => t.length > 0)
-            .join(" ");
+            .join("，");
 
         if (!skipInsert && text.length > 0) {
             this.term.sendInput(this.encoder.encode(text));

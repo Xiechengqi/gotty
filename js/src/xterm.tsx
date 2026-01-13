@@ -241,30 +241,6 @@ export class GoTTYXterm {
         // Restore focus to terminal
         this.term.focus();
     }
-
-    getCursorAnchor(): { left: number; top: number; height: number } | null {
-        const anyTerm: any = this.term as any;
-        const core = anyTerm?._core;
-        const renderService = core?._renderService;
-        const dims = renderService?.dimensions;
-        const cellWidth = dims?.actualCellWidth;
-        const cellHeight = dims?.actualCellHeight;
-        if (typeof cellWidth !== 'number' || typeof cellHeight !== 'number') return null;
-
-        const cursorX = this.term.buffer.active.cursorX;
-        const cursorY = this.term.buffer.active.cursorY;
-
-        const screen = this.term.element?.querySelector('.xterm-screen') as HTMLElement | null;
-        if (!screen) return null;
-
-        const containerRect = this.elem.getBoundingClientRect();
-        const screenRect = screen.getBoundingClientRect();
-
-        const left = (screenRect.left - containerRect.left) + (cursorX + 1) * cellWidth;
-        const top = (screenRect.top - containerRect.top) + cursorY * cellHeight;
-
-        return { left, top, height: cellHeight };
-    }
 }
 
 export { GoTTYXterm as OurXterm };
