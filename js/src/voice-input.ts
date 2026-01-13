@@ -88,6 +88,8 @@ export class VoiceInput {
 
         this.term.elem.addEventListener('focusin', () => { this.termFocused = true; });
         this.term.elem.addEventListener('focusout', () => { this.termFocused = false; });
+        const activeElem = document.activeElement;
+        this.termFocused = !!activeElem && this.term.elem.contains(activeElem);
 
         document.addEventListener('keydown', this.onKeyDownCapture, true);
         document.addEventListener('keyup', this.onKeyUpCapture, true);
