@@ -90,6 +90,9 @@ export class GoTTYXterm {
             }
         });
 
+        // Set up drag & drop handler for file upload
+        this.setupDragDropHandler();
+
         this.resizeListener = () => {
             this.fitAddOn.fit();
             this.term.scrollToBottom();
@@ -100,38 +103,60 @@ export class GoTTYXterm {
         this.term.focus();
         this.resizeListener();
 
-        // Handle paste event for file upload
-        this.setupPasteHandler();
-
         window.addEventListener("resize", () => { this.resizeListener(); });
     };
 
-    // Set up paste handler for file upload
-    private setupPasteHandler() {
-        // Listen for paste events on the terminal element
-        this.term.element?.addEventListener('paste', async (event: ClipboardEvent) => {
-            // Check if there are files in the clipboard
-            const items = event.clipboardData?.items;
-            if (!items) return;
+    // Set up drag & drop handler for file upload
+    private setupDragDropHandler() {
+        const terminalContainer = this.term.element;
 
-            const fileItems = Array.from(items).filter(item => item.type.indexOf('file') === 0);
+        if (!terminalContainer) return;
 
-            if (fileItems.length > 0) {
-                event.preventDefault();
-                event.stopPropagation();
+        // Prevent default drag behaviors
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            terminalContainer.addEventListener(eventName, (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+            }, false);
+        });
 
+        // Highlight on drag enter
+        terminalContainer.addEventListener('dragenter', () => {
+            this.showMessage('Drop file here to upload', 0);
+            terminalContainer.classList.add('gotty-drag-over');
+        }, false);
+
+        // Remove highlight on drag leave
+        terminalContainer.addEventListener('dragleave', (e: DragEvent) => {
+            if (!terminalContainer.contains(e.relatedTarget as Node)) {
+                this.removeMessage();
+                terminalContainer.classList.remove('gotty-drag-over');
+            }
+        }, false);
+
+        // Handle dropped files
+        terminalContainer.addEventListener('drop', async (e: DragEvent) => {
+            e.preventDefault();
+            terminalContainer.classList.remove('gotty-drag-over');
+            this.removeMessage();
+
+            const files = e.dataTransfer?.files;
+            if (files && files.length > 0) {
                 // Notify input activity
                 this.inputCallbacks.forEach((cb) => cb());
 
-                // Process uploaded files
-                for (const item of fileItems) {
-                    const file = item.getAsFile();
-                    if (file) {
-                        await this.uploadFile(file);
+                // Upload all dropped files
+                for (let i = 0; i < files.length; i++) {
+                    const file = files[i];
+                    await this.uploadFile(file);
+
+                    // If multiple files, show separator
+                    if (i < files.length - 1) {
+                        await new Promise(resolve => setTimeout(resolve, 100));
                     }
                 }
             }
-        });
+        }, false);
     }
 
     // Upload file to server

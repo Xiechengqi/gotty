@@ -24,3 +24,10 @@
 @import "bootstrap/scss/close";
 @import "bootstrap/scss/modal";
 @import "bootstrap/scss/spinners";
+
+// Drag & drop file upload styles
+.gotty-drag-over {
+    outline: 3px dashed #0d6efd !important;
+    outline-offset: -3px;
+    background-color: rgba(13, 110, 253, 0.1) !important;
+}
