@@ -15,6 +15,8 @@ const (
 	ResizeTerminal = '3'
 	// Change encoding
 	SetEncoding = '4'
+	// Upload file from clipboard
+	UploadFile = '7'
 )
 
 const (

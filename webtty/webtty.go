@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/pkg/errors"
@@ -28,6 +31,11 @@ type WebTTY struct {
 
 	bufferSize int
 	writeMutex sync.Mutex
+
+	// File upload state
+	uploadFile     *os.File
+	uploadFileName string
+	uploadChunks   int
 }
 
 // New creates a new instance of WebTTY.
@@ -52,6 +60,11 @@ func New(masterConn Master, slave Slave, options ...Option) (*WebTTY, error) {
 	}
 
 	return wt, nil
+}
+
+// Close cleans up resources including any open upload files
+func (wt *WebTTY) Close() {
+	wt.cleanupUploadFile()
 }
 
 // Run starts the main process of the WebTTY.
@@ -233,6 +246,21 @@ func (wt *WebTTY) handleMasterReadEvent(data []byte) error {
 		}
 
 		wt.slave.ResizeTerminal(columns, rows)
+
+	case UploadFile:
+		if !wt.permitWrite {
+			return nil
+		}
+
+		if len(data) <= 1 {
+			return nil
+		}
+
+		err := wt.handleUploadFile(data[1:])
+		if err != nil {
+			return errors.Wrapf(err, "failed to handle file upload")
+		}
+
 	default:
 		return errors.Errorf("unknown message type `%c`", data[0])
 	}
@@ -243,4 +271,132 @@ func (wt *WebTTY) handleMasterReadEvent(data []byte) error {
 type argResizeTerminal struct {
 	Columns float64
 	Rows    float64
+}
+
+// UploadFileMessage represents a file upload message from the client
+type UploadFileMessage struct {
+	Name        string `json:"name"`
+	Size        int    `json:"size"`
+	Chunk       int    `json:"chunk"`
+	TotalChunks int    `json:"totalChunks"`
+	Data        string `json:"data"`
+}
+
+// handleUploadFile handles file upload from the client
+func (wt *WebTTY) handleUploadFile(payload []byte) error {
+	var msg UploadFileMessage
+	if err := json.Unmarshal(payload, &msg); err != nil {
+		return errors.Wrapf(err, "failed to parse upload file message")
+	}
+
+	// Validate filename
+	if err := validateFileName(msg.Name); err != nil {
+		return errors.Wrapf(err, "invalid filename")
+	}
+	if msg.TotalChunks <= 0 {
+		return errors.New("invalid total chunks")
+	}
+	if msg.Chunk < 0 || msg.Chunk >= msg.TotalChunks {
+		return errors.Errorf("invalid chunk index %d", msg.Chunk)
+	}
+
+	// Handle first chunk - create/open file
+	if msg.Chunk == 0 {
+		// Close previous upload file if any
+		if wt.uploadFile != nil {
+			wt.uploadFile.Close()
+			wt.uploadFile = nil
+		}
+
+		wt.uploadFileName = msg.Name
+		wt.uploadChunks = 0
+
+		// Create file in current directory (use /proc/self/cwd for reliability)
+		workDir, err := getWorkingDir()
+		if err != nil {
+			return errors.Wrapf(err, "failed to get working directory")
+		}
+		filePath := filepath.Join(workDir, msg.Name)
+		file, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+		if err != nil {
+			return errors.Wrapf(err, "failed to create file %s", filePath)
+		}
+		wt.uploadFile = file
+	}
+
+	// Skip if not the expected chunk
+	if msg.Chunk != wt.uploadChunks {
+		return errors.Errorf("out-of-order chunk: expected %d, got %d", wt.uploadChunks, msg.Chunk)
+	}
+
+	// Decode base64 data
+	fileData, err := base64.StdEncoding.DecodeString(msg.Data)
+	if err != nil {
+		return errors.Wrapf(err, "failed to decode file data")
+	}
+
+	// Write chunk to file
+	if wt.uploadFile != nil {
+		_, err = wt.uploadFile.Write(fileData)
+		if err != nil {
+			return errors.Wrapf(err, "failed to write to file")
+		}
+	}
+
+	wt.uploadChunks++
+
+	// Handle last chunk - close file
+	if msg.Chunk == msg.TotalChunks-1 {
+		if wt.uploadFile != nil {
+			wt.uploadFile.Close()
+			wt.uploadFile = nil
+		}
+	}
+
+	return nil
+}
+
+// validateFileName validates that the filename is safe (no path traversal)
+func validateFileName(name string) error {
+	if name == "" {
+		return errors.New("empty filename")
+	}
+
+	// Check for path traversal attempts
+	if strings.Contains(name, "..") || strings.Contains(name, "/") || strings.Contains(name, "\\") {
+		return errors.New("filename contains invalid characters")
+	}
+
+	// Check for reserved names on Unix-like systems
+	baseName := filepath.Base(name)
+	if baseName == "." || baseName == ".." {
+		return errors.New("invalid filename")
+	}
+
+	return nil
+}
+
+// getWorkingDir returns the current working directory of the process
+func getWorkingDir() (string, error) {
+	// Try /proc/self/cwd first for reliability in containerized environments
+	cwd, err := os.Readlink("/proc/self/cwd")
+	if err == nil && cwd != "" {
+		return cwd, nil
+	}
+
+	// Fallback to PWD environment variable
+	if pwd := os.Getenv("PWD"); pwd != "" {
+		return pwd, nil
+	}
+
+	// Final fallback to current directory
+	return os.Getwd()
+}
+
+// cleanupUploadFile ensures any open upload file is closed
+func (wt *WebTTY) cleanupUploadFile() {
+	if wt.uploadFile != nil {
+		wt.uploadFile.Close()
+		wt.uploadFile = nil
+	}
 }

@@ -4,6 +4,20 @@ import { WebLinksAddon } from 'xterm-addon-web-links';
 import { WebglAddon } from 'xterm-addon-webgl';
 import { ZModemAddon } from "./zmodem";
 
+// 消息类型常量
+const MSG_UPLOAD_FILE = '7';
+
+// 文件上传配置
+const PREFERRED_CHUNK_SIZE = 8 * 1024; // 8KB per chunk
+
+interface UploadFileMessage {
+    name: string;
+    size: number;
+    chunk: number;
+    totalChunks: number;
+    data: string; // base64 encoded
+}
+
 export class GoTTYXterm {
     // The HTMLElement that contains our terminal
     elem: HTMLElement;
@@ -24,11 +38,14 @@ export class GoTTYXterm {
     zmodemAddon: ZModemAddon;
     toServer: (data: string | Uint8Array) => void;
     encoder: TextEncoder
+    sendUploadFile?: (msg: string) => void;
+    private uploadMaxMessageSize = 1024;
 
     // 输出/输入回调列表，用于空闲提醒等功能（可解绑）
     private outputCallbacks: Set<() => void> = new Set();
     private inputCallbacks: Set<() => void> = new Set();
     private selectionCallbacks: Set<() => void> = new Set();
+    private uploadCallbacks: Set<(fileName: string, progress: number) => void> = new Set();
 
     constructor(elem: HTMLElement) {
         this.elem = elem;
@@ -42,6 +59,7 @@ export class GoTTYXterm {
             toTerminal: (x: Uint8Array) => this.term.write(x),
             toServer: (x: Uint8Array) => this.sendInput(x)
         });
+        this.encoder = new TextEncoder();
         this.term.loadAddon(new WebLinksAddon());
         this.term.loadAddon(this.fitAddOn);
         this.term.loadAddon(this.zmodemAddon);
@@ -82,8 +100,98 @@ export class GoTTYXterm {
         this.term.focus();
         this.resizeListener();
 
+        // Handle paste event for file upload
+        this.setupPasteHandler();
+
         window.addEventListener("resize", () => { this.resizeListener(); });
     };
+
+    // Set up paste handler for file upload
+    private setupPasteHandler() {
+        // Listen for paste events on the terminal element
+        this.term.element?.addEventListener('paste', async (event: ClipboardEvent) => {
+            // Check if there are files in the clipboard
+            const items = event.clipboardData?.items;
+            if (!items) return;
+
+            const fileItems = Array.from(items).filter(item => item.type.indexOf('file') === 0);
+
+            if (fileItems.length > 0) {
+                event.preventDefault();
+                event.stopPropagation();
+
+                // Notify input activity
+                this.inputCallbacks.forEach((cb) => cb());
+
+                // Process uploaded files
+                for (const item of fileItems) {
+                    const file = item.getAsFile();
+                    if (file) {
+                        await this.uploadFile(file);
+                    }
+                }
+            }
+        });
+    }
+
+    // Upload file to server
+    private async uploadFile(file: File): Promise<void> {
+        const fileName = file.name;
+        const fileSize = file.size;
+        if (fileSize === 0) {
+            this.showMessage(`${fileName} is empty`, 3000);
+            return;
+        }
+
+        const chunkSize = this.getUploadChunkSize(fileName, fileSize);
+        if (chunkSize <= 0) {
+            this.showMessage(`Failed to upload ${fileName}: chunk too large`, 3000);
+            return;
+        }
+
+        const totalChunks = Math.ceil(fileSize / chunkSize);
+
+        // Notify upload start
+        this.uploadCallbacks.forEach((cb) => cb(fileName, 0));
+        this.showMessage(`Uploading ${fileName}...`, 0);
+
+        try {
+            const arrayBuffer = await file.arrayBuffer();
+            const uint8Array = new Uint8Array(arrayBuffer);
+
+            for (let chunk = 0; chunk < totalChunks; chunk++) {
+                const start = chunk * chunkSize;
+                const end = Math.min(start + chunkSize, fileSize);
+                const chunkData = uint8Array.slice(start, end);
+
+                // Convert to base64 efficiently
+                const base64Data = btoa(String.fromCharCode.apply(null, chunkData as unknown as number[]));
+
+                // Create upload message
+                const uploadMsg: UploadFileMessage = {
+                    name: fileName,
+                    size: fileSize,
+                    chunk: chunk,
+                    totalChunks: totalChunks,
+                    data: base64Data
+                };
+
+                // Send to server
+                if (this.sendUploadFile) {
+                    this.sendUploadFile(MSG_UPLOAD_FILE + JSON.stringify(uploadMsg));
+                }
+
+                // Calculate and notify progress
+                const progress = Math.round(((chunk + 1) / totalChunks) * 100);
+                this.uploadCallbacks.forEach((cb) => cb(fileName, progress));
+            }
+
+            this.showMessage(`${fileName} uploaded successfully`, 3000);
+        } catch (error) {
+            console.error('Upload failed:', error);
+            this.showMessage(`Failed to upload ${fileName}`, 3000);
+        }
+    }
 
     info(): { columns: number, rows: number } {
         return { columns: this.term.cols, rows: this.term.rows };
@@ -173,7 +281,6 @@ export class GoTTYXterm {
     }
 
     onInput(callback: (input: string) => void) {
-        this.encoder = new TextEncoder()
         this.toServer = callback;
 
         // I *think* we're ok like this, but if not, we can dispose
@@ -187,6 +294,44 @@ export class GoTTYXterm {
             this.toServer(this.encoder.encode(input));
         });
     };
+
+    // Set the upload file sender (called from WebTTY)
+    setUploadFileSender(sender: (msg: string) => void) {
+        this.sendUploadFile = sender;
+    }
+
+    setUploadFileBufferSize(size: number) {
+        if (Number.isFinite(size) && size > 0) {
+            this.uploadMaxMessageSize = size;
+        }
+    }
+
+    private getUploadChunkSize(fileName: string, fileSize: number): number {
+        const maxPayloadBytes = Math.max(0, this.uploadMaxMessageSize - 1);
+        const maxValue = Math.max(1, fileSize);
+        const overheadMessage: UploadFileMessage = {
+            name: fileName,
+            size: fileSize,
+            chunk: maxValue - 1,
+            totalChunks: maxValue,
+            data: ""
+        };
+        const overheadBytes = this.encoder.encode(JSON.stringify(overheadMessage)).length;
+        const available = maxPayloadBytes - overheadBytes;
+        if (available < 4) {
+            return 0;
+        }
+        const maxRaw = Math.floor(available / 4) * 3;
+        return Math.min(PREFERRED_CHUNK_SIZE, maxRaw);
+    }
+
+    // Register upload callback (returns unsubscribe function)
+    onUpload(callback: (fileName: string, progress: number) => void): () => void {
+        this.uploadCallbacks.add(callback);
+        return () => {
+            this.uploadCallbacks.delete(callback);
+        };
+    }
 
     onResize(callback: (colmuns: number, rows: number) => void) {
         this.onResizeHandler = this.term.onResize(() => {

@@ -5,6 +5,7 @@ export const msgInput = '1';
 export const msgPing = '2';
 export const msgResizeTerminal = '3';
 export const msgSetEncoding = '4';
+export const msgUploadFile = '7';
 
 export const msgUnknownOutput = '0';
 export const msgOutput = '1';
@@ -161,6 +162,14 @@ export class WebTTY {
                     }
                 );
 
+                // Initialize upload file sender
+                if ('setUploadFileSender' in this.term) {
+                    (this.term as any).setUploadFileSender((msg: string) => this.sendUploadFile(msg));
+                }
+                if ('setUploadFileBufferSize' in this.term) {
+                    (this.term as any).setUploadFileBufferSize(this.bufSize);
+                }
+
                 pingTimer = setInterval(() => {
                     this.sendPing()
                 }, 30 * 1000);
@@ -189,6 +198,9 @@ export class WebTTY {
                     case msgSetBufferSize:
                         const bufSize = JSON.parse(payload);
                         this.bufSize = bufSize;
+                        if ('setUploadFileBufferSize' in this.term) {
+                            (this.term as any).setUploadFileBufferSize(this.bufSize);
+                        }
                         break;
                 }
             });
@@ -246,6 +258,16 @@ export class WebTTY {
             let inputChunk = dataString.substring(i * maxChunkSize, Math.min((i + 1) * maxChunkSize, dataString.length))
             this.connection.send(msgInput + btoa(inputChunk));
         }
+    }
+
+    private sendUploadFile(msg: string) {
+        const encoder = new TextEncoder();
+        const msgBytes = encoder.encode(msg).length;
+        if (msgBytes > this.bufSize) {
+            console.warn("Upload message exceeds server buffer size, aborting send.");
+            return;
+        }
+        this.connection.send(msg);
     }
 
     private sendPing(): void {

@@ -167,6 +167,9 @@ func (server *Server) processWSConn(ctx context.Context, conn *websocket.Conn, h
 
 	err = tty.Run(ctx)
 
+	// Clean up resources
+	tty.Close()
+
 	return err
 }
 
