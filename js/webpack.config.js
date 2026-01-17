@@ -1,6 +1,6 @@
 const path = require('path');
 const TerserPlugin = require("terser-webpack-plugin");
-const LicenseWebpackPlugin = require('license-webpack-plugin').LicenseWebpackPlugin;
+// const LicenseWebpackPlugin = require('license-webpack-plugin').LicenseWebpackPlugin;
 
 var devtool;
 
@@ -23,7 +23,7 @@ module.exports = {
         extensions: [".ts", ".tsx", ".js"],
     },
     plugins: [
-        new LicenseWebpackPlugin()
+        // new LicenseWebpackPlugin({ licensePluginOptions: { outputFilename: 'LICENSE.txt' } })
     ],
     module: {
         rules: [
