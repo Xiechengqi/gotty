@@ -261,6 +261,23 @@ func (wt *WebTTY) handleMasterReadEvent(data []byte) error {
 			return errors.Wrapf(err, "failed to handle file upload")
 		}
 
+	case UploadCancel:
+		// Cancel ongoing upload and clean up partial file
+		if wt.uploadFile != nil {
+			wt.uploadFile.Close()
+			// Delete the partial file
+			if wt.uploadFileName != "" {
+				workDir, err := getWorkingDir()
+				if err == nil {
+					filePath := filepath.Join(workDir, wt.uploadFileName)
+					os.Remove(filePath)
+				}
+			}
+			wt.uploadFile = nil
+			wt.uploadFileName = ""
+			wt.uploadChunks = 0
+		}
+
 	default:
 		return errors.Errorf("unknown message type `%c`", data[0])
 	}

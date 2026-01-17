@@ -17,6 +17,8 @@ const (
 	SetEncoding = '4'
 	// Upload file from clipboard
 	UploadFile = '7'
+	// Cancel ongoing file upload
+	UploadCancel = '8'
 )
 
 const (
