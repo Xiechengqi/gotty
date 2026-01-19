@@ -36,6 +36,7 @@ type WebTTY struct {
 	uploadFile     *os.File
 	uploadFileName string
 	uploadChunks   int
+	uploadWorkDir  string
 }
 
 // New creates a new instance of WebTTY.
@@ -266,16 +267,14 @@ func (wt *WebTTY) handleMasterReadEvent(data []byte) error {
 		if wt.uploadFile != nil {
 			wt.uploadFile.Close()
 			// Delete the partial file
-			if wt.uploadFileName != "" {
-				workDir, err := getWorkingDir()
-				if err == nil {
-					filePath := filepath.Join(workDir, wt.uploadFileName)
-					os.Remove(filePath)
-				}
+			if wt.uploadFileName != "" && wt.uploadWorkDir != "" {
+				filePath := filepath.Join(wt.uploadWorkDir, wt.uploadFileName)
+				os.Remove(filePath)
 			}
 			wt.uploadFile = nil
 			wt.uploadFileName = ""
 			wt.uploadChunks = 0
+			wt.uploadWorkDir = ""
 		}
 
 	default:
@@ -306,7 +305,7 @@ func (wt *WebTTY) handleUploadFile(payload []byte) error {
 		return errors.Wrapf(err, "failed to parse upload file message")
 	}
 
-	// Validate filename
+	// Validate filename (relative path only)
 	if err := validateFileName(msg.Name); err != nil {
 		return errors.Wrapf(err, "invalid filename")
 	}
@@ -328,11 +327,13 @@ func (wt *WebTTY) handleUploadFile(payload []byte) error {
 		wt.uploadFileName = msg.Name
 		wt.uploadChunks = 0
 
-		// Create file in current directory (use /proc/self/cwd for reliability)
-		workDir, err := getWorkingDir()
+		// Get the PTY slave's current working directory
+		workDir, err := wt.slave.GetWorkingDir()
 		if err != nil {
 			return errors.Wrapf(err, "failed to get working directory")
 		}
+		wt.uploadWorkDir = workDir
+
 		filePath := filepath.Join(workDir, msg.Name)
 		file, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
 		if err != nil {
@@ -368,20 +369,27 @@ func (wt *WebTTY) handleUploadFile(payload []byte) error {
 			wt.uploadFile.Close()
 			wt.uploadFile = nil
 		}
+		wt.uploadWorkDir = ""
 	}
 
 	return nil
 }
 
-// validateFileName validates that the filename is safe (no path traversal)
+// validateFileName validates that the filename is safe (relative path only, no path traversal)
 func validateFileName(name string) error {
 	if name == "" {
 		return errors.New("empty filename")
 	}
 
-	// Check for path traversal attempts
-	if strings.Contains(name, "..") || strings.Contains(name, "/") || strings.Contains(name, "\\") {
-		return errors.New("filename contains invalid characters")
+	// Allow relative paths (starting with ./ or just a name)
+	// Disallow absolute paths
+	if strings.HasPrefix(name, "/") || strings.HasPrefix(name, "\\") {
+		return errors.New("absolute paths are not allowed")
+	}
+
+	// Check for path traversal attempts (parent directory references)
+	if strings.Contains(name, "..") {
+		return errors.New("path traversal is not allowed")
 	}
 
 	// Check for reserved names on Unix-like systems
@@ -391,23 +399,6 @@ func validateFileName(name string) error {
 	}
 
 	return nil
-}
-
-// getWorkingDir returns the current working directory of the process
-func getWorkingDir() (string, error) {
-	// Try /proc/self/cwd first for reliability in containerized environments
-	cwd, err := os.Readlink("/proc/self/cwd")
-	if err == nil && cwd != "" {
-		return cwd, nil
-	}
-
-	// Fallback to PWD environment variable
-	if pwd := os.Getenv("PWD"); pwd != "" {
-		return pwd, nil
-	}
-
-	// Final fallback to current directory
-	return os.Getwd()
 }
 
 // cleanupUploadFile ensures any open upload file is closed

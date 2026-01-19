@@ -3,6 +3,7 @@ package localcommand
 import (
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -109,6 +110,15 @@ func (lcmd *LocalCommand) WindowTitleVariables() map[string]interface{} {
 		"argv":    lcmd.argv,
 		"pid":     lcmd.cmd.Process.Pid,
 	}
+}
+
+// GetWorkingDir returns the current working directory of the process.
+// On Linux, this reads from /proc/<pid>/cwd.
+func (lcmd *LocalCommand) GetWorkingDir() (string, error) {
+	if lcmd.cmd != nil && lcmd.cmd.Process != nil {
+		return os.Readlink("/proc/" + strconv.Itoa(lcmd.cmd.Process.Pid) + "/cwd")
+	}
+	return "", errors.New("process not found")
 }
 
 func (lcmd *LocalCommand) ResizeTerminal(width int, height int) error {

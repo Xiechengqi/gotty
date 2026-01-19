@@ -399,6 +399,7 @@ export class GoTTYXterm {
         window.addEventListener('dragenter', (e: DragEvent) => {
             if (e.dataTransfer?.files.length) {
                 this.dropOverlay?.show(e.dataTransfer.files);
+                document.body.classList.add('gotty-drag-border');
             }
         }, false);
 
@@ -420,6 +421,7 @@ export class GoTTYXterm {
                 !document.body.contains(e.relatedTarget as Node)
             )) {
                 this.dropOverlay?.hide();
+                document.body.classList.remove('gotty-drag-border');
             }
         }, false);
 
@@ -427,6 +429,7 @@ export class GoTTYXterm {
         window.addEventListener('drop', async (e: DragEvent) => {
             e.preventDefault();
             this.dropOverlay?.hide();
+            document.body.classList.remove('gotty-drag-border');
 
             const files = e.dataTransfer?.files;
             if (files && files.length > 0) {
@@ -539,17 +542,11 @@ export class GoTTYXterm {
                 this.uploadCallbacks.forEach((cb) => cb(fileName, progress));
             }
 
-            // 上传完成
+            // 上传完成 - 等待用户点击确定按钮关闭
             uploadTask.status = 'completed';
             uploadTask.progress = 100;
             this.showMessage(`${fileName} 上传成功`, 3000);
-
-            // 2秒后自动关闭模态框（仅当仍在 completed 状态时）
-            setTimeout(() => {
-                if (this.currentUploadTask?.status === 'completed') {
-                    this.hideUploadModal();
-                }
-            }, 2000);
+            // 不自动关闭模态框，等待用户点击确定按钮
 
         } catch (error) {
             console.error('Upload failed:', error);
@@ -575,6 +572,23 @@ export class GoTTYXterm {
     // 隐藏上传模态框
     private hideUploadModal() {
         if (this.uploadModalContainer) {
+            // 先调用模态框的 hide 方法，等待 Bootstrap 清理 backdrop
+            const modalElem = this.uploadModalContainer.querySelector('.modal');
+            if (modalElem) {
+                const bsModal = Modal.getInstance(modalElem);
+                if (bsModal) {
+                    // 监听隐藏完成事件
+                    const onHidden = () => {
+                        this.uploadModalContainer!.innerHTML = '';
+                        this.currentUploadTask = null;
+                        modalElem.removeEventListener('hidden.bs.modal', onHidden);
+                    };
+                    modalElem.addEventListener('hidden.bs.modal', onHidden);
+                    bsModal.hide();
+                    return;
+                }
+            }
+            // 如果没有找到模态框实例，直接清理
             this.uploadModalContainer.innerHTML = '';
         }
         this.currentUploadTask = null;

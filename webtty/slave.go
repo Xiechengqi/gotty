@@ -14,4 +14,8 @@ type Slave interface {
 
 	// ResizeTerminal sets a new size of the terminal.
 	ResizeTerminal(columns int, rows int) error
+
+	// GetWorkingDir returns the current working directory of the PTY slave process.
+	// This is used for file uploads to save files to the correct directory.
+	GetWorkingDir() (string, error)
 }

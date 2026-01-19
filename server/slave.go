@@ -9,6 +9,7 @@ type Slave interface {
 	webtty.Slave
 
 	Close() error
+	GetWorkingDir() (string, error)
 }
 
 type Factory interface {
