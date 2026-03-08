@@ -106,10 +106,11 @@ func main() {
 
 		log.Printf("GoTTY is starting with command: %s", strings.Join(args.Slice(), " "))
 
-		errs := make(chan error, 1)
+		errs := make(chan error, 2)
 		go func() {
 			errs <- srv.Run(ctx, server.WithGracefullContext(gCtx))
 		}()
+
 		err = waitSignals(errs, cancel, gCancel)
 
 		if err != nil && err != context.Canceled {

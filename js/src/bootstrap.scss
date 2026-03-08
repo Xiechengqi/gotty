@@ -181,3 +181,58 @@
         }
     }
 }
+
+// ==================== 响应式布局优化 ====================
+
+// xterm 容器样式
+.xterm {
+    height: 100%;
+}
+
+.xterm-viewport {
+    height: 100% !important;
+}
+
+// 连接数显示
+.connection-count {
+    position: fixed;
+    background: rgba(0, 0, 0, 0.7);
+    color: #fff;
+    padding: 5px 10px;
+    border-radius: 4px;
+    z-index: 1000;
+    transition: all 0.3s ease;
+}
+
+// 移动端样式 (<768px)
+@media (max-width: 767px) {
+    .xterm {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .connection-count {
+        top: 5px;
+        right: 5px;
+        font-size: 10px;
+        padding: 3px 6px;
+    }
+}
+
+// 平板样式 (768-1024px)
+@media (min-width: 768px) and (max-width: 1023px) {
+    .connection-count {
+        top: 10px;
+        right: 10px;
+        font-size: 11px;
+    }
+}
+
+// 桌面样式 (>=1024px)
+@media (min-width: 1024px) {
+    .connection-count {
+        top: 10px;
+        right: 10px;
+        font-size: 12px;
+    }
+}
