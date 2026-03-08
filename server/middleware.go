@@ -25,6 +25,13 @@ func (server *Server) wrapHeaders(handler http.Handler) http.Handler {
 
 func (server *Server) wrapBasicAuth(handler http.Handler, credential string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Check cookie first for persistent auth
+		if cookie, err := r.Cookie("gotty_auth_token"); err == nil && cookie.Value == credential {
+			log.Printf("Cookie Authentication Succeeded: %s", r.RemoteAddr)
+			handler.ServeHTTP(w, r)
+			return
+		}
+
 		token := strings.SplitN(r.Header.Get("Authorization"), " ", 2)
 
 		if len(token) != 2 || strings.ToLower(token[0]) != "basic" {
@@ -44,6 +51,17 @@ func (server *Server) wrapBasicAuth(handler http.Handler, credential string) htt
 			http.Error(w, "authorization failed", http.StatusUnauthorized)
 			return
 		}
+
+		// Set persistent cookie on successful auth
+		http.SetCookie(w, &http.Cookie{
+			Name:     "gotty_auth_token",
+			Value:    credential,
+			Path:     "/",
+			MaxAge:   30 * 24 * 60 * 60,
+			HttpOnly: false,
+			Secure:   r.TLS != nil,
+			SameSite: http.SameSiteStrictMode,
+		})
 
 		log.Printf("Basic Authentication Succeeded: %s", r.RemoteAddr)
 		handler.ServeHTTP(w, r)
