@@ -234,6 +234,17 @@ func (server *Server) indexVariables(r *http.Request) (map[string]interface{}, e
 }
 
 func (server *Server) handleAuthToken(w http.ResponseWriter, r *http.Request) {
+	// Set persistent cookie for 30 days
+	http.SetCookie(w, &http.Cookie{
+		Name:     "gotty_auth_token",
+		Value:    server.options.Credential,
+		Path:     "/",
+		MaxAge:   30 * 24 * 60 * 60, // 30 days
+		HttpOnly: true,
+		Secure:   r.TLS != nil,
+		SameSite: http.SameSiteStrictMode,
+	})
+
 	w.Header().Set("Content-Type", "application/javascript")
 	// @TODO hashing?
 	w.Write([]byte("var gotty_auth_token = '" + server.options.Credential + "';"))

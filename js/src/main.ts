@@ -16,6 +16,17 @@ declare var gotty_enable_asr: boolean;
 declare var gotty_asr_hold_ms: number;
 declare var gotty_asr_hotkey: string;
 
+// Helper function to get cookie value
+function getCookie(name: string): string | null {
+    const value = `; ${document.cookie}`;
+    const parts = value.split(`; ${name}=`);
+    if (parts.length === 2) return parts.pop()?.split(';').shift() || null;
+    return null;
+}
+
+// Get auth token from cookie first, fallback to global variable
+const authToken = getCookie('gotty_auth_token') || gotty_auth_token;
+
 const elem = document.getElementById("terminal")
 
 if (elem !== null) {
@@ -71,14 +82,14 @@ if (elem !== null) {
     const url = (httpsEnabled ? 'wss://' : 'ws://') + window.location.host + basePath + 'ws' + queryArgs;
     const args = window.location.search;
     const factory = new ConnectionFactory(url, protocols);
-    const wt = new WebTTY(term, factory, args, gotty_auth_token);
+    const wt = new WebTTY(term, factory, args, authToken);
     const closer = wt.open();
 
     let voiceInput: VoiceInput | null = null;
     if (typeof gotty_enable_asr !== 'undefined' && gotty_enable_asr) {
         voiceInput = new VoiceInput({
             term,
-            authToken: gotty_auth_token,
+            authToken: authToken,
             enabled: gotty_enable_asr,
             permitWrite: typeof gotty_permit_write !== 'undefined' ? gotty_permit_write : false,
             holdMs: (typeof gotty_asr_hold_ms === 'number' && gotty_asr_hold_ms >= 0) ? gotty_asr_hold_ms : 500,
