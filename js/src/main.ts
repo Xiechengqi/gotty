@@ -24,8 +24,22 @@ function getCookie(name: string): string | null {
     return null;
 }
 
-// Get auth token from cookie first, fallback to global variable
-const authToken = getCookie('gotty_auth_token') || gotty_auth_token;
+// Get auth token with fallback chain: localStorage -> Cookie -> global variable
+let authToken: string = '';
+try {
+    authToken = localStorage.getItem('gotty_auth_token') ||
+                getCookie('gotty_auth_token') ||
+                (typeof gotty_auth_token !== 'undefined' ? gotty_auth_token : '');
+
+    // Save to localStorage for persistence
+    if (authToken && authToken !== localStorage.getItem('gotty_auth_token')) {
+        localStorage.setItem('gotty_auth_token', authToken);
+    }
+} catch (e) {
+    // Fallback if localStorage is not available
+    authToken = getCookie('gotty_auth_token') ||
+                (typeof gotty_auth_token !== 'undefined' ? gotty_auth_token : '');
+}
 
 const elem = document.getElementById("terminal")
 
