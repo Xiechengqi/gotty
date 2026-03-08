@@ -1,13 +1,27 @@
-html, body, #terminal {
-    background: rgb(40, 41, 53);
-    height: 100%;
+html,
+body {
     width: 100%;
-    padding: 0%;
-    margin: 0%;
+    height: 100%;
+    padding: 0;
+    margin: 0;
+}
+
+body,
+#terminal {
+    background: rgb(40, 41, 53);
+    width: 100%;
+    height: 100%;
+    min-height: 100vh;
+    min-height: 100dvh;
+}
+
+body {
+    overflow: hidden;
 }
 
 #terminal {
   position: relative;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
 .progress .progress-bar {
@@ -52,6 +66,6 @@ html, body, #terminal {
 }
 
 .gotty-voice-btn--fallback {
-  right: 16px;
-  bottom: 16px;
+  right: max(16px, env(safe-area-inset-right, 0px));
+  bottom: max(16px, env(safe-area-inset-bottom, 0px));
 }

@@ -29,6 +29,16 @@ type Options struct {
 	PassHeaders         bool   `hcl:"pass_headers" flagName:"pass-headers" flagDescribe:"Pass HTTP request headers as environment variables (e.g. Cookie becomes HTTP_COOKIE)" default:"false"`
 	Width               int    `hcl:"width" flagName:"width" flagDescribe:"Static width of the screen, 0(default) means dynamically resize" default:"0"`
 	Height              int    `hcl:"height" flagName:"height" flagDescribe:"Static height of the screen, 0(default) means dynamically resize" default:"0"`
+	ResizePolicy        string `hcl:"resize_policy" flagName:"resize-policy" flagDescribe:"Terminal resize policy: fixed, leader, or median" default:"leader"`
+	MinCols             int    `hcl:"min_cols" flagName:"min-cols" flagDescribe:"Minimum terminal columns when resizing dynamically" default:"60"`
+	MaxCols             int    `hcl:"max_cols" flagName:"max-cols" flagDescribe:"Maximum terminal columns when resizing dynamically" default:"240"`
+	MinRows             int    `hcl:"min_rows" flagName:"min-rows" flagDescribe:"Minimum terminal rows when resizing dynamically" default:"20"`
+	MaxRows             int    `hcl:"max_rows" flagName:"max-rows" flagDescribe:"Maximum terminal rows when resizing dynamically" default:"80"`
+	ResizeDebounceMs    int    `hcl:"resize_debounce_ms" flagName:"resize-debounce-ms" flagDescribe:"Debounce window in milliseconds for terminal resize updates" default:"120"`
+	LeaderSelect        string `hcl:"leader_select" flagName:"leader-select" flagDescribe:"Leader selection mode for leader policy: latest or first" default:"latest"`
+	LeaderSwitch        string `hcl:"leader_switch" flagName:"leader-switch" flagDescribe:"Leader change mode for leader policy: never, on_disconnect, or on_idle" default:"on_disconnect"`
+	LeaderIdleMs        int    `hcl:"leader_idle_ms" flagName:"leader-idle-ms" flagDescribe:"Idle timeout in milliseconds before leader can be replaced in on_idle mode" default:"10000"`
+	ShowTerminalState   bool   `hcl:"show_terminal_state" flagName:"show-terminal-state" flagDescribe:"Show terminal resize state overlay in the browser" default:"false"`
 	WSOrigin            string `hcl:"ws_origin" flagName:"ws-origin" flagDescribe:"A regular expression that matches origin URLs to be accepted by WebSocket. No cross origin requests are acceptable by default" default:""`
 	WSQueryArgs         string `hcl:"ws_query_args" flagName:"ws-query-args" flagDescribe:"Querystring arguments to append to the websocket instantiation" default:""`
 	EnableWebGL         bool   `hcl:"enable_webgl" flagName:"enable-webgl" flagDescribe:"Enable WebGL renderer" default:"true"`
@@ -53,6 +63,33 @@ func (options *Options) Validate() error {
 	}
 	if options.EnableASR && options.ASRHoldMs < 0 {
 		return errors.New("enable-asr is enabled, but asr-hold-ms must be >= 0")
+	}
+	switch options.ResizePolicy {
+	case "fixed", "leader", "median":
+	default:
+		return errors.New("resize-policy must be one of: fixed, leader, median")
+	}
+	switch options.LeaderSwitch {
+	case "never", "on_disconnect", "on_idle":
+	default:
+		return errors.New("leader-switch must be one of: never, on_disconnect, on_idle")
+	}
+	switch options.LeaderSelect {
+	case "latest", "first":
+	default:
+		return errors.New("leader-select must be one of: latest, first")
+	}
+	if options.MinCols <= 0 || options.MaxCols <= 0 || options.MinRows <= 0 || options.MaxRows <= 0 {
+		return errors.New("min/max terminal bounds must be > 0")
+	}
+	if options.MinCols > options.MaxCols || options.MinRows > options.MaxRows {
+		return errors.New("min terminal bounds must be <= max bounds")
+	}
+	if options.ResizeDebounceMs < 0 {
+		return errors.New("resize-debounce-ms must be >= 0")
+	}
+	if options.LeaderIdleMs < 0 {
+		return errors.New("leader-idle-ms must be >= 0")
 	}
 	return nil
 }

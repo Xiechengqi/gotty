@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"net/url"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -111,66 +110,70 @@ func (server *Server) processWSConn(ctx context.Context, conn *websocket.Conn, h
 		return errors.New("failed to authenticate websocket connection")
 	}
 
-	queryPath := "?"
-	if server.options.PermitArguments && init.Arguments != "" {
-		queryPath = init.Arguments
+	client := &Client{
+		conn:  conn,
+		send:  make(chan []byte, 256),
+		ready: make(chan struct{}),
 	}
 
-	query, err := url.Parse(queryPath)
-	if err != nil {
-		return errors.Wrapf(err, "failed to parse arguments")
-	}
-	params := query.Query()
-	var slave Slave
-	slave, err = server.factory.New(params, headers)
-	if err != nil {
-		return errors.Wrapf(err, "failed to create backend")
-	}
-	defer slave.Close()
-
-	titleVars := server.titleVariables(
-		[]string{"server", "master", "slave"},
-		map[string]map[string]interface{}{
-			"server": server.options.TitleVariables,
-			"master": map[string]interface{}{
-				"remote_addr": conn.RemoteAddr(),
-			},
-			"slave": slave.WindowTitleVariables(),
-		},
-	)
-
-	titleBuf := new(bytes.Buffer)
-	err = server.titleTemplate.Execute(titleBuf, titleVars)
-	if err != nil {
-		return errors.Wrapf(err, "failed to fill window title template")
+	server.sessionManager.register <- client
+	defer func() {
+		server.sessionManager.unregister <- client
+	}()
+	select {
+	case <-client.ready:
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 
-	opts := []webtty.Option{
-		webtty.WithWindowTitle(titleBuf.Bytes()),
-	}
-	if server.options.PermitWrite {
-		opts = append(opts, webtty.WithPermitWrite())
-	}
-	if server.options.EnableReconnect {
-		opts = append(opts, webtty.WithReconnect(server.options.ReconnectTime))
-	}
-	if server.options.Width > 0 {
-		opts = append(opts, webtty.WithFixedColumns(server.options.Width))
-	}
-	if server.options.Height > 0 {
-		opts = append(opts, webtty.WithFixedRows(server.options.Height))
-	}
-	tty, err := webtty.New(&wsWrapper{conn}, slave, opts...)
-	if err != nil {
-		return errors.Wrapf(err, "failed to create webtty")
+	// Send history
+	history := server.sessionManager.history.GetAll()
+	for _, msg := range history {
+		if err := conn.WriteMessage(websocket.TextMessage, msg); err != nil {
+			return err
+		}
 	}
 
-	err = tty.Run(ctx)
+	// Send initial messages
+	server.sendInitMessages(conn, client)
 
-	// Clean up resources
-	tty.Close()
+	done := make(chan struct{})
 
-	return err
+	// Write to client
+	go func() {
+		defer close(done)
+		for {
+			select {
+			case message, ok := <-client.send:
+				if !ok {
+					return
+				}
+				if err := conn.WriteMessage(websocket.TextMessage, message); err != nil {
+					return
+				}
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	// Read from client
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-done:
+			return nil
+		default:
+			_, message, err := conn.ReadMessage()
+			if err != nil {
+				return err
+			}
+			if len(message) > 0 {
+				server.handleClientInput(client, message)
+			}
+		}
+	}
 }
 
 func (server *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
@@ -247,6 +250,15 @@ func (server *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		"var gotty_enable_asr = " + strconv.FormatBool(server.options.EnableASR) + ";",
 		"var gotty_asr_hold_ms = " + strconv.Itoa(server.options.ASRHoldMs) + ";",
 		"var gotty_asr_hotkey = '" + server.options.ASRHotkey + "';",
+		"var gotty_resize_policy = '" + server.options.ResizePolicy + "';",
+		"var gotty_resize_debounce_ms = " + strconv.Itoa(server.options.ResizeDebounceMs) + ";",
+		"var gotty_resize_min_cols = " + strconv.Itoa(server.options.MinCols) + ";",
+		"var gotty_resize_max_cols = " + strconv.Itoa(server.options.MaxCols) + ";",
+		"var gotty_resize_min_rows = " + strconv.Itoa(server.options.MinRows) + ";",
+		"var gotty_resize_max_rows = " + strconv.Itoa(server.options.MaxRows) + ";",
+		"var gotty_leader_select = '" + server.options.LeaderSelect + "';",
+		"var gotty_leader_idle_ms = " + strconv.Itoa(server.options.LeaderIdleMs) + ";",
+		"var gotty_show_terminal_state = " + strconv.FormatBool(server.options.ShowTerminalState) + ";",
 	}
 
 	w.Write([]byte(strings.Join(lines, "\n")))

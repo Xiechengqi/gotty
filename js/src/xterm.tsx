@@ -3,8 +3,11 @@ import { FitAddon } from 'xterm-addon-fit';
 import { WebLinksAddon } from 'xterm-addon-web-links';
 import { WebglAddon } from 'xterm-addon-webgl';
 import { ZModemAddon } from "./zmodem";
+import { TerminalStatePayload } from "./webtty";
 import { render, createRef, Component } from 'preact';
 import { Modal } from 'bootstrap';
+
+declare var gotty_show_terminal_state: boolean;
 
 // 消息类型常量
 const MSG_UPLOAD_FILE = '7';
@@ -291,10 +294,16 @@ export class GoTTYXterm {
     term: Terminal;
 
     resizeListener: () => void;
+    viewportResizeListener: (() => void) | null = null;
+    private fitRequestId: number | null = null;
 
     message: HTMLElement;
     messageTimeout: number;
     messageTimer: NodeJS.Timeout;
+
+    connectionCountElem: HTMLElement;
+    terminalStateElem: HTMLElement | null = null;
+    private showTerminalStateOverlay: boolean;
 
     onResizeHandler: IDisposable;
     onDataHandler: IDisposable;
@@ -320,6 +329,8 @@ export class GoTTYXterm {
 
     constructor(elem: HTMLElement) {
         this.elem = elem;
+        this.showTerminalStateOverlay =
+            (typeof gotty_show_terminal_state !== 'undefined') ? !!gotty_show_terminal_state : false;
         this.term = new Terminal({
             theme: {
                 background: 'rgb(40, 41, 53)'
@@ -338,6 +349,21 @@ export class GoTTYXterm {
         this.message = elem.ownerDocument.createElement("div");
         this.message.className = "xterm-overlay";
         this.messageTimeout = 2000;
+
+        // 创建连接数显示
+        this.connectionCountElem = elem.ownerDocument.createElement("div");
+        this.connectionCountElem.className = "connection-count";
+        this.connectionCountElem.style.cssText = "position:fixed;top:10px;right:10px;background:rgba(0,0,0,0.7);color:#fff;padding:5px 10px;border-radius:4px;font-size:12px;z-index:1000;";
+        this.connectionCountElem.textContent = "连接数: 1";
+        elem.appendChild(this.connectionCountElem);
+
+        if (this.showTerminalStateOverlay) {
+            this.terminalStateElem = elem.ownerDocument.createElement("div");
+            this.terminalStateElem.className = "terminal-state";
+            this.terminalStateElem.style.cssText = "position:fixed;top:42px;right:10px;background:rgba(0,0,0,0.7);color:#fff;padding:4px 8px;border-radius:4px;font-size:11px;z-index:1000;";
+            this.terminalStateElem.textContent = "尺寸策略: --";
+            elem.appendChild(this.terminalStateElem);
+        }
 
         // 创建上传模态框容器
         this.uploadModalContainer = document.createElement('div');
@@ -369,16 +395,19 @@ export class GoTTYXterm {
         this.setupDragDropHandler();
 
         this.resizeListener = () => {
-            this.fitAddOn.fit();
-            this.term.scrollToBottom();
-            this.showMessage(String(this.term.cols) + "x" + String(this.term.rows), this.messageTimeout);
+            this.scheduleFit();
         };
 
         this.term.open(elem);
+        this.fitTerminal();
         this.term.focus();
-        this.resizeListener();
 
-        window.addEventListener("resize", () => { this.resizeListener(); });
+        window.addEventListener("resize", this.resizeListener);
+        window.addEventListener("orientationchange", this.resizeListener);
+        if (window.visualViewport) {
+            this.viewportResizeListener = () => this.scheduleFit();
+            window.visualViewport.addEventListener("resize", this.viewportResizeListener);
+        }
     };
 
     // Set up drag & drop handler for file upload
@@ -606,6 +635,22 @@ export class GoTTYXterm {
         }
     }
 
+    private scheduleFit(): void {
+        if (this.fitRequestId !== null) {
+            cancelAnimationFrame(this.fitRequestId);
+        }
+        this.fitRequestId = requestAnimationFrame(() => {
+            this.fitRequestId = null;
+            this.fitTerminal();
+        });
+    }
+
+    private fitTerminal(): void {
+        // Fit terminal size to the container so the viewport can reach the bottom.
+        this.fitAddOn.fit();
+        this.term.scrollToBottom();
+    }
+
     info(): { columns: number, rows: number } {
         return { columns: this.term.cols, rows: this.term.rows };
     };
@@ -689,6 +734,19 @@ export class GoTTYXterm {
         });
     };
 
+    updateConnectionCount(count: number) {
+        this.connectionCountElem.textContent = `连接数: ${count}`;
+    };
+
+    updateTerminalState(state: TerminalStatePayload) {
+        if (!this.terminalStateElem) {
+            return;
+        }
+        const leader = state.leaderClientId || "-";
+        const size = `${state.activeCols}x${state.activeRows}`;
+        this.terminalStateElem.textContent = `尺寸: ${size} | 策略: ${state.policy} | leader: ${leader}`;
+    };
+
     sendInput(data: Uint8Array) {
         return this.toServer(data)
     }
@@ -766,6 +824,14 @@ export class GoTTYXterm {
 
     close(): void {
         window.removeEventListener("resize", this.resizeListener);
+        window.removeEventListener("orientationchange", this.resizeListener);
+        if (window.visualViewport && this.viewportResizeListener) {
+            window.visualViewport.removeEventListener("resize", this.viewportResizeListener);
+        }
+        if (this.fitRequestId !== null) {
+            cancelAnimationFrame(this.fitRequestId);
+            this.fitRequestId = null;
+        }
         this.term.dispose();
         this.dropOverlay?.destroy();
         this.hideUploadModal();

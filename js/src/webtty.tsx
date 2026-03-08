@@ -14,6 +14,10 @@ export const msgSetWindowTitle = '3';
 export const msgSetPreferences = '4';
 export const msgSetReconnect = '5';
 export const msgSetBufferSize = '6';
+export const msgConnectionCount = '7';
+export const msgTerminalState = '8';
+
+declare var gotty_resize_debounce_ms: number;
 
 
 export interface Terminal {
@@ -63,9 +67,26 @@ export interface Terminal {
      */
     onResize(callback: (colmuns: number, rows: number) => void): void;
 
+    /*
+     * Update connection count display
+     */
+    updateConnectionCount?(count: number): void;
+    updateTerminalState?(state: TerminalStatePayload): void;
+
     reset(): void;
     deactivate(): void;
     close(): void;
+}
+
+export interface TerminalStatePayload {
+    activeCols: number;
+    activeRows: number;
+    policy: string;
+    leaderClientId: string;
+    reason: string;
+    sourceClientId: string;
+    connectedClients: number;
+    resizeEnabled: boolean;
 }
 
 export interface Connection {
@@ -126,6 +147,9 @@ export class WebTTY {
      * into chunks small enough that we don't hurt the server's feelings.
      */
     bufSize: number;
+    resizeDebounceMs: number;
+    resizeTimer: ReturnType<typeof setTimeout> | null;
+    pendingResize: { columns: number, rows: number } | null;
 
     constructor(term: Terminal, connectionFactory: ConnectionFactory, args: string, authToken: string) {
         this.term = term;
@@ -134,6 +158,12 @@ export class WebTTY {
         this.authToken = authToken;
         this.reconnect = -1;
         this.bufSize = 1024;
+        this.resizeDebounceMs =
+            (typeof gotty_resize_debounce_ms === "number" && gotty_resize_debounce_ms >= 0)
+                ? gotty_resize_debounce_ms
+                : 120;
+        this.resizeTimer = null;
+        this.pendingResize = null;
     };
 
     open() {
@@ -149,7 +179,7 @@ export class WebTTY {
                 this.initializeConnection(this.args, this.authToken);
 
                 this.term.onResize((columns: number, rows: number) => {
-                    this.sendResizeTerminal(columns, rows);
+                    this.queueResizeTerminal(columns, rows);
                 });
 
                 this.sendResizeTerminal(termInfo.columns, termInfo.rows);
@@ -202,6 +232,18 @@ export class WebTTY {
                             (this.term as any).setUploadFileBufferSize(this.bufSize);
                         }
                         break;
+                    case msgConnectionCount:
+                        if (this.term.updateConnectionCount) {
+                            const count = parseInt(payload);
+                            this.term.updateConnectionCount(count);
+                        }
+                        break;
+                    case msgTerminalState:
+                        const state = JSON.parse(payload) as TerminalStatePayload;
+                        if (this.term.updateTerminalState) {
+                            this.term.updateTerminalState(state);
+                        }
+                        break;
                 }
             });
 
@@ -224,6 +266,11 @@ export class WebTTY {
         setup();
         return () => {
             clearTimeout(reconnectTimeout);
+            if (this.resizeTimer !== null) {
+                clearTimeout(this.resizeTimer);
+                this.resizeTimer = null;
+            }
+            this.pendingResize = null;
             connection.close();
         }
     };
@@ -274,12 +321,40 @@ export class WebTTY {
         this.connection.send(msgPing);
     }
 
+    private queueResizeTerminal(columns: number, rows: number) {
+        this.pendingResize = { columns, rows };
+        if (this.resizeTimer !== null) {
+            clearTimeout(this.resizeTimer);
+        }
+
+        this.resizeTimer = setTimeout(() => {
+            if (!this.pendingResize) {
+                return;
+            }
+            const next = this.pendingResize;
+            this.pendingResize = null;
+            this.sendResizeTerminal(next.columns, next.rows);
+        }, this.resizeDebounceMs);
+    }
+
+    private getDeviceClass(viewportWidth: number): string {
+        if (viewportWidth < 640) return "mobile";
+        if (viewportWidth < 1024) return "tablet";
+        return "desktop";
+    }
+
     private sendResizeTerminal(colmuns: number, rows: number) {
+        const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 0;
+        const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
         this.connection.send(
             msgResizeTerminal + JSON.stringify(
                 {
                     columns: colmuns,
-                    rows: rows
+                    rows: rows,
+                    deviceClass: this.getDeviceClass(viewportWidth),
+                    pixelRatio: window.devicePixelRatio || 1,
+                    viewportWidth: viewportWidth,
+                    viewportHeight: viewportHeight
                 }
             )
         );

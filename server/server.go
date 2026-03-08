@@ -34,6 +34,7 @@ type Server struct {
 	indexTemplate    *template.Template
 	titleTemplate    *noesctmpl.Template
 	manifestTemplate *template.Template
+	sessionManager   *SessionManager
 }
 
 // New creates a new instance of Server.
@@ -105,6 +106,20 @@ func (server *Server) Run(ctx context.Context, options ...RunOption) error {
 	for _, opt := range options {
 		opt(opts)
 	}
+
+	// Initialize shared session
+	slave, err := server.factory.New(nil, nil)
+	if err != nil {
+		return errors.Wrapf(err, "failed to create shared terminal")
+	}
+	defer slave.Close()
+
+	server.sessionManager = NewSessionManager(cctx, slave, server.options)
+	if err := server.sessionManager.InitializeTerminal(); err != nil {
+		return errors.Wrapf(err, "failed to initialize terminal size")
+	}
+	go server.sessionManager.Run()
+	go server.readSlaveOutput(cctx)
 
 	counter := newCounter(time.Duration(server.options.Timeout) * time.Second)
 
