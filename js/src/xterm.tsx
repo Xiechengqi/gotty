@@ -302,6 +302,7 @@ export class GoTTYXterm {
     messageTimer: NodeJS.Timeout;
 
     connectionCountElem: HTMLElement;
+    clearHistoryBtn: HTMLElement;
     terminalStateElem: HTMLElement | null = null;
     private showTerminalStateOverlay: boolean;
 
@@ -334,7 +335,8 @@ export class GoTTYXterm {
         this.term = new Terminal({
             theme: {
                 background: 'rgb(40, 41, 53)'
-            }
+            },
+            scrollback: 500
         });
         this.fitAddOn = new FitAddon();
         this.zmodemAddon = new ZModemAddon({
@@ -356,6 +358,17 @@ export class GoTTYXterm {
         this.connectionCountElem.style.cssText = "position:fixed;top:10px;right:10px;background:rgba(0,0,0,0.7);color:#fff;padding:5px 10px;border-radius:4px;font-size:12px;z-index:1000;";
         this.connectionCountElem.textContent = "连接数: 1";
         elem.appendChild(this.connectionCountElem);
+
+        // 创建清理历史按钮
+        this.clearHistoryBtn = elem.ownerDocument.createElement("button");
+        this.clearHistoryBtn.className = "clear-history-btn";
+        this.clearHistoryBtn.innerHTML = "🗑️";
+        this.clearHistoryBtn.title = "清除历史消息";
+        this.clearHistoryBtn.style.cssText = "position:fixed;top:10px;right:120px;background:rgba(0,0,0,0.7);color:#fff;padding:5px 10px;border-radius:4px;font-size:14px;z-index:1000;cursor:pointer;border:none;";
+        this.clearHistoryBtn.addEventListener('click', () => {
+            this.clearHistory();
+        });
+        elem.appendChild(this.clearHistoryBtn);
 
         if (this.showTerminalStateOverlay) {
             this.terminalStateElem = elem.ownerDocument.createElement("div");
@@ -820,6 +833,11 @@ export class GoTTYXterm {
         this.removeMessage();
         this.term.clear();
         this.hideUploadModal();
+    }
+
+    clearHistory(): void {
+        this.term.clear();
+        this.showMessage("历史消息已清除", 2000);
     }
 
     close(): void {
