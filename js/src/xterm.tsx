@@ -303,6 +303,8 @@ export class GoTTYXterm {
 
     connectionCountElem: HTMLElement;
     clearHistoryBtn: HTMLElement;
+    uploadBtn: HTMLElement;
+    fileInput: HTMLInputElement;
     terminalStateElem: HTMLElement | null = null;
     private showTerminalStateOverlay: boolean;
 
@@ -369,6 +371,30 @@ export class GoTTYXterm {
             this.clearHistory();
         });
         elem.appendChild(this.clearHistoryBtn);
+
+        // 创建上传按钮
+        this.uploadBtn = elem.ownerDocument.createElement("button");
+        this.uploadBtn.className = "upload-btn";
+        this.uploadBtn.innerHTML = "📤";
+        this.uploadBtn.title = "上传文件";
+        this.uploadBtn.style.cssText = "position:fixed;top:74px;right:10px;background:rgba(0,0,0,0.7);color:#fff;padding:3px 8px;border-radius:4px;font-size:12px;z-index:1000;cursor:pointer;border:none;";
+        this.uploadBtn.addEventListener('click', () => {
+            this.fileInput.click();
+        });
+        elem.appendChild(this.uploadBtn);
+
+        // 创建隐藏的文件输入元素
+        this.fileInput = elem.ownerDocument.createElement("input");
+        this.fileInput.type = "file";
+        this.fileInput.style.display = "none";
+        this.fileInput.addEventListener('change', async (e) => {
+            const files = (e.target as HTMLInputElement).files;
+            if (files && files.length > 0) {
+                await this.uploadFile(files[0]);
+                this.fileInput.value = ''; // 清空选择，允许重复上传同一文件
+            }
+        });
+        elem.appendChild(this.fileInput);
 
         if (this.showTerminalStateOverlay) {
             this.terminalStateElem = elem.ownerDocument.createElement("div");
