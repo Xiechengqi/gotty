@@ -364,7 +364,7 @@ export class GoTTYXterm {
         this.clearHistoryBtn.className = "clear-history-btn";
         this.clearHistoryBtn.innerHTML = "🗑️";
         this.clearHistoryBtn.title = "清除历史消息";
-        this.clearHistoryBtn.style.cssText = "position:fixed;top:10px;right:120px;background:rgba(0,0,0,0.7);color:#fff;padding:5px 10px;border-radius:4px;font-size:14px;z-index:1000;cursor:pointer;border:none;";
+        this.clearHistoryBtn.style.cssText = "position:fixed;top:42px;right:10px;background:rgba(0,0,0,0.7);color:#fff;padding:3px 8px;border-radius:4px;font-size:12px;z-index:1000;cursor:pointer;border:none;";
         this.clearHistoryBtn.addEventListener('click', () => {
             this.clearHistory();
         });
@@ -836,6 +836,9 @@ export class GoTTYXterm {
     }
 
     clearHistory(): void {
+        // Send clear command to server
+        this.sendInput(this.encoder.encode("clear\n"));
+        // Clear local terminal display
         this.term.clear();
         this.showMessage("历史消息已清除", 2000);
     }
