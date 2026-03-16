@@ -364,7 +364,7 @@ export class GoTTYXterm {
         // 创建清理历史按钮
         this.clearHistoryBtn = elem.ownerDocument.createElement("button");
         this.clearHistoryBtn.className = "clear-history-btn";
-        this.clearHistoryBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M6 2V1h4v1h4v2H2V2h4zm-1 3v8h6V5H5zm2 1v6h2V6H7z" fill="currentColor"/></svg>';
+        this.clearHistoryBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M2 5h12M5 5V3h6v2M7 7v6M9 7v6M4 5v9a1 1 0 001 1h6a1 1 0 001-1V5" stroke="rgba(255,255,255,0.7)" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
         this.clearHistoryBtn.title = "清除历史消息";
         this.clearHistoryBtn.style.cssText = "position:fixed;top:42px;right:10px;background:rgba(0,0,0,0.7);color:#fff;padding:3px 8px;border-radius:4px;font-size:12px;z-index:1000;cursor:pointer;border:none;";
         this.clearHistoryBtn.addEventListener('click', () => {
@@ -375,7 +375,7 @@ export class GoTTYXterm {
         // 创建上传按钮
         this.uploadBtn = elem.ownerDocument.createElement("button");
         this.uploadBtn.className = "upload-btn";
-        this.uploadBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M8 2l4 4h-3v5H7V6H4l4-4zm-6 9v3h12v-3h2v5H0v-5h2z" fill="currentColor"/></svg>';
+        this.uploadBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M8 11V3M8 3L5 6M8 3l3 3M3 13h10" stroke="rgba(255,255,255,0.7)" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
         this.uploadBtn.title = "上传文件";
         this.uploadBtn.style.cssText = "position:fixed;top:74px;right:10px;background:rgba(0,0,0,0.7);color:#fff;padding:3px 8px;border-radius:4px;font-size:12px;z-index:1000;cursor:pointer;border:none;";
         this.uploadBtn.addEventListener('click', () => {
