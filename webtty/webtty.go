@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -44,6 +45,7 @@ type WebTTY struct {
 // typically it's a websocket connection to a client.
 // slave is a PTY slave such as a local command with a PTY.
 func New(masterConn Master, slave Slave, options ...Option) (*WebTTY, error) {
+	log.Printf("WebTTY: Creating new instance with buffer size: 16384")
 	wt := &WebTTY{
 		masterConn: masterConn,
 		slave:      slave,
@@ -52,7 +54,7 @@ func New(masterConn Master, slave Slave, options ...Option) (*WebTTY, error) {
 		columns:     0,
 		rows:        0,
 
-		bufferSize: 1024,
+		bufferSize: 16384,
 		decoder:    &NullCodec{},
 	}
 
@@ -60,6 +62,7 @@ func New(masterConn Master, slave Slave, options ...Option) (*WebTTY, error) {
 		option(wt)
 	}
 
+	log.Printf("WebTTY: Instance created with final buffer size: %d", wt.bufferSize)
 	return wt, nil
 }
 
@@ -137,6 +140,7 @@ func (wt *WebTTY) sendInitializeMessage() error {
 	}
 
 	bufSizeMsg, _ := json.Marshal(wt.bufferSize)
+	log.Printf("Sending buffer size to client: %d bytes", wt.bufferSize)
 	err = wt.masterWrite(append([]byte{SetBufferSize}, bufSizeMsg...))
 	if err != nil {
 		return errors.Wrapf(err, "failed to send buffer size")
@@ -186,6 +190,8 @@ func (wt *WebTTY) handleMasterReadEvent(data []byte) error {
 	if len(data) == 0 {
 		return errors.New("unexpected zero length read from master")
 	}
+
+	log.Printf("Received message type: %c, length: %d", data[0], len(data))
 
 	switch data[0] {
 	case Input:
@@ -335,6 +341,7 @@ func (wt *WebTTY) handleUploadFile(payload []byte) error {
 		wt.uploadWorkDir = workDir
 
 		filePath := filepath.Join(workDir, msg.Name)
+		log.Printf("Upload: Creating file at %s", filePath)
 		file, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
 		if err != nil {
 			return errors.Wrapf(err, "failed to create file %s", filePath)
@@ -368,7 +375,10 @@ func (wt *WebTTY) handleUploadFile(payload []byte) error {
 		if wt.uploadFile != nil {
 			wt.uploadFile.Close()
 			wt.uploadFile = nil
+			log.Printf("Upload: File upload completed: %s", wt.uploadFileName)
 		}
+		wt.uploadFileName = ""
+		wt.uploadChunks = 0
 		wt.uploadWorkDir = ""
 	}
 

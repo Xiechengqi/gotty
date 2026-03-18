@@ -47,6 +47,12 @@ func (server *Server) sendInitMessages(conn *websocket.Conn, client *Client) err
 	prefsMsg := append([]byte{'4'}, prefsData...)
 	conn.WriteMessage(websocket.TextMessage, prefsMsg)
 
+	// Send buffer size
+	bufSize := 16384
+	bufSizeData, _ := json.Marshal(bufSize)
+	bufSizeMsg := append([]byte{'6'}, bufSizeData...)
+	conn.WriteMessage(websocket.TextMessage, bufSizeMsg)
+
 	return nil
 }
 
@@ -73,5 +79,9 @@ func (server *Server) handleClientInput(client *Client, message []byte) {
 			return
 		}
 		server.sessionManager.HandleClientResize(client, resizeReq)
+	case '7': // Upload file
+		if len(message) > 1 {
+			server.sessionManager.HandleFileUpload(message[1:])
+		}
 	}
 }

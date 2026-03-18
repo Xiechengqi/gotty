@@ -310,10 +310,12 @@ export class WebTTY {
     private sendUploadFile(msg: string) {
         const encoder = new TextEncoder();
         const msgBytes = encoder.encode(msg).length;
+        console.log(`[Upload] Message size: ${msgBytes} bytes, Buffer size: ${this.bufSize} bytes`);
         if (msgBytes > this.bufSize) {
-            console.warn("Upload message exceeds server buffer size, aborting send.");
+            console.warn("[Upload] Message exceeds server buffer size, aborting send.");
             return;
         }
+        console.log("[Upload] Sending message to server");
         this.connection.send(msg);
     }
 

@@ -2,10 +2,14 @@ package server
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
+	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -74,6 +78,12 @@ type SessionManager struct {
 	nextClientSeq    int64
 	clientOrder      map[string]int64
 	clientSizes      map[string]resizeDimensions
+
+	// File upload state
+	uploadFile     interface{}
+	uploadFileName string
+	uploadChunks   int
+	uploadWorkDir  string
 }
 
 func NewSessionManager(ctx context.Context, slave Slave, options *Options) *SessionManager {
@@ -474,4 +484,99 @@ func medianInt(values []int) int {
 		return values[mid]
 	}
 	return (values[mid-1] + values[mid]) / 2
+}
+
+// UploadFileMessage represents a file upload message from the client
+type UploadFileMessage struct {
+	Name        string `json:"name"`
+	Size        int    `json:"size"`
+	Chunk       int    `json:"chunk"`
+	TotalChunks int    `json:"totalChunks"`
+	Data        string `json:"data"`
+}
+
+// HandleFileUpload handles file upload from the client
+func (sm *SessionManager) HandleFileUpload(payload []byte) {
+	var msg UploadFileMessage
+	if err := json.Unmarshal(payload, &msg); err != nil {
+		log.Printf("Upload: Failed to parse message: %v", err)
+		return
+	}
+
+	// Validate filename
+	if err := validateUploadFileName(msg.Name); err != nil {
+		log.Printf("Upload: Invalid filename: %v", err)
+		return
+	}
+
+	// Handle first chunk
+	if msg.Chunk == 0 {
+		if sm.uploadFile != nil {
+			if f, ok := sm.uploadFile.(*os.File); ok {
+				f.Close()
+			}
+		}
+
+		workDir, err := sm.slave.GetWorkingDir()
+		if err != nil {
+			log.Printf("Upload: Failed to get working directory: %v", err)
+			return
+		}
+
+		filePath := filepath.Join(workDir, msg.Name)
+		log.Printf("Upload: Creating file at %s", filePath)
+
+		file, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+		if err != nil {
+			log.Printf("Upload: Failed to create file: %v", err)
+			return
+		}
+
+		sm.uploadFile = file
+		sm.uploadFileName = msg.Name
+		sm.uploadChunks = 0
+		sm.uploadWorkDir = workDir
+	}
+
+	// Decode and write chunk
+	fileData, err := base64.StdEncoding.DecodeString(msg.Data)
+	if err != nil {
+		log.Printf("Upload: Failed to decode data: %v", err)
+		return
+	}
+
+	if f, ok := sm.uploadFile.(*os.File); ok {
+		_, err = f.Write(fileData)
+		if err != nil {
+			log.Printf("Upload: Failed to write data: %v", err)
+			return
+		}
+	}
+
+	sm.uploadChunks++
+
+	// Handle last chunk
+	if msg.Chunk == msg.TotalChunks-1 {
+		if f, ok := sm.uploadFile.(*os.File); ok {
+			f.Close()
+			log.Printf("Upload: File upload completed: %s", sm.uploadFileName)
+		}
+		sm.uploadFile = nil
+		sm.uploadFileName = ""
+		sm.uploadChunks = 0
+		sm.uploadWorkDir = ""
+	}
+}
+
+func validateUploadFileName(name string) error {
+	if name == "" {
+		return fmt.Errorf("empty filename")
+	}
+	if strings.HasPrefix(name, "/") || strings.HasPrefix(name, "\\") {
+		return fmt.Errorf("absolute paths not allowed")
+	}
+	if strings.Contains(name, "..") {
+		return fmt.Errorf("path traversal not allowed")
+	}
+	return nil
 }
