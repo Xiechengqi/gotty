@@ -306,6 +306,7 @@ export class GoTTYXterm {
     uploadBtn: HTMLElement;
     fileInput: HTMLInputElement;
     terminalStateElem: HTMLElement | null = null;
+    private apiIndicatorElem: HTMLElement | null = null;
     private showTerminalStateOverlay: boolean;
 
     onResizeHandler: IDisposable;
@@ -407,6 +408,12 @@ export class GoTTYXterm {
         // 创建上传模态框容器
         this.uploadModalContainer = document.createElement('div');
         document.body.appendChild(this.uploadModalContainer);
+
+        // 创建 API 执行指示器（默认隐藏）
+        this.apiIndicatorElem = elem.ownerDocument.createElement("div");
+        this.apiIndicatorElem.className = "gotty-api-indicator";
+        this.apiIndicatorElem.innerHTML = '<span class="api-indicator-dot"></span> API 执行中';
+        elem.appendChild(this.apiIndicatorElem);
 
         // Auto-copy selection to clipboard
         this.term.onSelectionChange(() => {
@@ -784,6 +791,23 @@ export class GoTTYXterm {
         const leader = state.leaderClientId || "-";
         const size = `${state.activeCols}x${state.activeRows}`;
         this.terminalStateElem.textContent = `尺寸: ${size} | 策略: ${state.policy} | leader: ${leader}`;
+    };
+
+    showAPIIndicator(execId: string) {
+        if (this.apiIndicatorElem) {
+            this.apiIndicatorElem.setAttribute('data-exec-id', execId);
+            this.apiIndicatorElem.classList.add('active');
+        }
+    };
+
+    hideAPIIndicator(execId: string) {
+        if (this.apiIndicatorElem) {
+            const current = this.apiIndicatorElem.getAttribute('data-exec-id');
+            if (current === execId) {
+                this.apiIndicatorElem.classList.remove('active');
+                this.apiIndicatorElem.removeAttribute('data-exec-id');
+            }
+        }
     };
 
     sendInput(data: Uint8Array) {

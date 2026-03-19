@@ -67,7 +67,15 @@ func (server *Server) handleClientInput(client *Client, message []byte) {
 			decoded := make([]byte, base64.StdEncoding.DecodedLen(len(message)-1))
 			n, err := base64.StdEncoding.Decode(decoded, message[1:])
 			if err == nil && n > 0 {
-				server.sessionManager.slave.Write(decoded[:n])
+				if server.terminalStatus != nil {
+					// Atomically check state, update activity, and write
+					server.terminalStatus.WriteIfNotExecuting(func() {
+						server.terminalStatus.updateUserActivityLocked()
+						server.sessionManager.slave.Write(decoded[:n])
+					})
+				} else {
+					server.sessionManager.slave.Write(decoded[:n])
+				}
 			}
 		}
 	case '3': // Resize

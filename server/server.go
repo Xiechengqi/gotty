@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/json"
 	"html/template"
 	"io/fs"
 	"log"
@@ -35,6 +36,11 @@ type Server struct {
 	titleTemplate    *noesctmpl.Template
 	manifestTemplate *template.Template
 	sessionManager   *SessionManager
+
+	// API components
+	terminalStatus *TerminalStatus
+	broadcastCtrl  *BroadcastController
+	execManager    *ExecManager
 }
 
 // New creates a new instance of Server.
@@ -118,6 +124,29 @@ func (server *Server) Run(ctx context.Context, options ...RunOption) error {
 	if err := server.sessionManager.InitializeTerminal(); err != nil {
 		return errors.Wrapf(err, "failed to initialize terminal size")
 	}
+
+	// Initialize API components BEFORE starting goroutines to avoid data race
+	if server.options.EnableAPI {
+		server.terminalStatus = NewTerminalStatus(time.Duration(server.options.UserIdleMs) * time.Millisecond)
+		defer server.terminalStatus.Stop()
+
+		server.broadcastCtrl = NewBroadcastController()
+
+		probeTimeout := time.Duration(server.options.ProbeTimeoutMs) * time.Millisecond
+		probeManager := NewProbeManager(slave, server.broadcastCtrl, probeTimeout)
+
+		notifyFn := func(execID, status string) {
+			payload, _ := json.Marshal(map[string]string{
+				"type":    status,
+				"exec_id": execID,
+			})
+			server.sessionManager.NotifyClients('9', payload)
+		}
+
+		server.execManager = NewExecManager(slave, server.terminalStatus, probeManager, notifyFn)
+		log.Printf("API enabled")
+	}
+
 	go server.sessionManager.Run()
 	go server.readSlaveOutput(cctx)
 
@@ -169,18 +198,19 @@ func (server *Server) Run(ctx context.Context, options ...RunOption) error {
 
 	srvErr := make(chan error, 1)
 	go func() {
+		var sErr error
 		if server.options.EnableTLS {
 			crtFile := homedir.Expand(server.options.TLSCrtFile)
 			keyFile := homedir.Expand(server.options.TLSKeyFile)
 			log.Printf("TLS crt file: " + crtFile)
 			log.Printf("TLS key file: " + keyFile)
 
-			err = srv.ServeTLS(listener, crtFile, keyFile)
+			sErr = srv.ServeTLS(listener, crtFile, keyFile)
 		} else {
-			err = srv.Serve(listener)
+			sErr = srv.Serve(listener)
 		}
-		if err != nil {
-			srvErr <- err
+		if sErr != nil {
+			srvErr <- sErr
 		}
 	}()
 
@@ -246,6 +276,17 @@ func (server *Server) setupHandlers(ctx context.Context, cancel context.CancelFu
 	wsMux.Handle("/", siteHandler)
 	wsMux.HandleFunc(pathPrefix+"ws", server.generateHandleWS(ctx, cancel, counter))
 	wsMux.HandleFunc(pathPrefix+"asr/ws", server.generateHandleASRWS(ctx))
+
+	// Register API routes
+	if server.options.EnableAPI {
+		apiPrefix := pathPrefix + "api/v1/"
+		wsMux.Handle(apiPrefix+"input", server.wrapAPIAuth(http.HandlerFunc(server.handleAPIInput)))
+		wsMux.Handle(apiPrefix+"exec", server.wrapAPIAuth(http.HandlerFunc(server.handleAPIExec)))
+		wsMux.Handle(apiPrefix+"exec/stream", server.wrapAPIAuth(http.HandlerFunc(server.handleAPIExecStream)))
+		wsMux.Handle(apiPrefix+"output/lines", server.wrapAPIAuth(http.HandlerFunc(server.handleAPIOutputLines)))
+		wsMux.Handle(apiPrefix+"status", server.wrapAPIAuth(http.HandlerFunc(server.handleAPIStatus)))
+	}
+
 	siteHandler = http.Handler(wsMux)
 
 	return siteHandler

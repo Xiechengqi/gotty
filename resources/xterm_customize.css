@@ -206,3 +206,39 @@
     border-color: #888;
     background: rgba(80, 81, 93, 0.95);
 }
+
+/* API 执行指示器 */
+.gotty-api-indicator {
+    position: fixed;
+    top: 10px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(220, 120, 20, 0.9);
+    color: #fff;
+    padding: 4px 14px;
+    border-radius: 4px;
+    font-size: 12px;
+    z-index: 1001;
+    display: none;
+    align-items: center;
+    gap: 6px;
+    user-select: none;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.gotty-api-indicator.active {
+    display: flex;
+}
+
+.api-indicator-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #fff;
+    animation: api-indicator-pulse 1s ease-in-out infinite;
+}
+
+@keyframes api-indicator-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+}

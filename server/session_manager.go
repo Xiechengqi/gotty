@@ -408,20 +408,18 @@ func (sm *SessionManager) pickLeaderFallbackLocked() string {
 
 func (sm *SessionManager) sendConnectionCount() {
 	sm.mu.RLock()
-	count := len(sm.clients)
-	sm.mu.RUnlock()
+	defer sm.mu.RUnlock()
 
+	count := len(sm.clients)
 	msg := []byte{'7'}
 	msg = append(msg, []byte(fmt.Sprintf("%d", count))...)
 
-	sm.mu.RLock()
 	for client := range sm.clients {
 		select {
 		case client.send <- msg:
 		default:
 		}
 	}
-	sm.mu.RUnlock()
 }
 
 func (sm *SessionManager) broadcastTerminalState(reason string) {
@@ -466,6 +464,20 @@ func (sm *SessionManager) GetClientCount() int {
 	return len(sm.clients)
 }
 
+// NotifyClients sends a notification message to all connected Web clients.
+// Used for API execution indicators (show/hide).
+func (sm *SessionManager) NotifyClients(msgType byte, payload []byte) {
+	msg := append([]byte{msgType}, payload...)
+	sm.mu.RLock()
+	for client := range sm.clients {
+		select {
+		case client.send <- msg:
+		default:
+		}
+	}
+	sm.mu.RUnlock()
+}
+
 func clamp(value, min, max int) int {
 	if value < min {
 		return min
@@ -508,6 +520,9 @@ func (sm *SessionManager) HandleFileUpload(payload []byte) {
 		log.Printf("Upload: Invalid filename: %v", err)
 		return
 	}
+
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
 
 	// Handle first chunk
 	if msg.Chunk == 0 {

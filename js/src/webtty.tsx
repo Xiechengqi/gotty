@@ -16,6 +16,7 @@ export const msgSetReconnect = '5';
 export const msgSetBufferSize = '6';
 export const msgConnectionCount = '7';
 export const msgTerminalState = '8';
+export const msgAPINotification = '9';
 
 declare var gotty_resize_debounce_ms: number;
 
@@ -72,6 +73,8 @@ export interface Terminal {
      */
     updateConnectionCount?(count: number): void;
     updateTerminalState?(state: TerminalStatePayload): void;
+    showAPIIndicator?(execId: string): void;
+    hideAPIIndicator?(execId: string): void;
 
     reset(): void;
     deactivate(): void;
@@ -242,6 +245,14 @@ export class WebTTY {
                         const state = JSON.parse(payload) as TerminalStatePayload;
                         if (this.term.updateTerminalState) {
                             this.term.updateTerminalState(state);
+                        }
+                        break;
+                    case msgAPINotification:
+                        const notification = JSON.parse(payload);
+                        if (notification.type === 'api_exec_start' && this.term.showAPIIndicator) {
+                            this.term.showAPIIndicator(notification.exec_id);
+                        } else if (notification.type === 'api_exec_end' && this.term.hideAPIIndicator) {
+                            this.term.hideAPIIndicator(notification.exec_id);
                         }
                         break;
                 }

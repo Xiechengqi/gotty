@@ -36,4 +36,6 @@ const (
 	SetReconnect = '5'
 	// Set the input buffer size
 	SetBufferSize = '6'
+	// API execution notification
+	APINotification = '9'
 )

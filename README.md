@@ -22,6 +22,7 @@ GoTTY 是一个简单的命令行工具，可以将你的 CLI 工具转换为 We
 - 📁 支持 zmodem 文件传输协议
 - 🔄 支持自动重连
 - ⚡ WebGL 渲染加速
+- 🔌 REST API 支持 — 通过 HTTP 接口模拟键盘输入、执行命令、获取终端输出
 
 ## 技术架构
 
@@ -63,6 +64,17 @@ GoTTY 是一个简单的命令行工具，可以将你的 CLI 工具转换为 We
 │  │  │ (键盘/鼠标)   │  │  (终端输出)      │     │               │
 │  │  └──────┬───────┘  └────────▲────────┘     │               │
 │  └─────────┼──────────────────┼────────────────┘               │
+│            │                  │                                │
+│  ┌─────────┼──────────────────┼──────────────────┐             │
+│  │  REST API Layer (可选)                        │             │
+│  │  ┌────────────┐ ┌──────────┐ ┌─────────────┐  │             │
+│  │  │TerminalState│ │  Probe   │ │ ExecManager │  │             │
+│  │  │ (互斥状态机) │ │(环境探测) │ │ (命令执行)  │  │             │
+│  │  └────────────┘ └──────────┘ └─────────────┘  │             │
+│  │  ┌──────────────────────────────────────────┐  │             │
+│  │  │       BroadcastController (广播控制)      │  │             │
+│  │  └──────────────────────────────────────────┘  │             │
+│  └─────────┼──────────────────┼──────────────────┘             │
 │            │                  │                                │
 │  ┌─────────▼──────────────────┴────────────┐                   │
 │  │          PTY (Pseudo Terminal)         │                   │
@@ -339,6 +351,10 @@ max_connection = 10
 
 // 终端设置
 enable_webgl = true
+
+// REST API
+enable_api = true
+api_token = "your-secret-token"
 ```
 
 #### 3. Nginx 反向代理
@@ -423,6 +439,13 @@ certbot certonly --standalone -d gotty.example.com
 --permit-arguments          允许 URL 参数传递命令参数
 --config                    配置文件路径 (默认: "~/.gotty")
 --quiet                     静默模式
+
+# API 选项
+--enable-api                启用 REST API (默认: false)
+--api-token                 API 认证令牌 (为空则不鉴权)
+--api-probe-timeout         Shell 探测超时毫秒数 (默认: 500)
+--api-user-idle-ms          用户空闲超时毫秒数，用于 API 互斥 (默认: 2000)
+--api-exec-timeout          API 命令执行超时秒数 (默认: 30)
 ```
 
 ### 环境变量
@@ -435,6 +458,183 @@ export GOTTY_CREDENTIAL=admin:secret
 export GOTTY_ENABLE_TLS=true
 gotty bash
 ```
+
+## REST API
+
+GoTTY 提供 REST API，允许通过 HTTP 接口控制终端。API 执行的命令会同步显示在 Web 终端中。
+
+### 启用 API
+
+```sh
+# 启用 API（需要同时启用写入权限）
+gotty -w --enable-api bash
+
+# 启用 API 并设置认证令牌
+gotty -w --enable-api --api-token="your-secret-token" bash
+```
+
+### 认证
+
+设置了 `--api-token` 后，所有 API 请求需要携带令牌：
+
+```sh
+# 方式一：Authorization Header
+curl -H "Authorization: Bearer your-secret-token" http://localhost:8080/api/v1/status
+
+# 方式二：Query 参数
+curl http://localhost:8080/api/v1/status?token=your-secret-token
+```
+
+### 互斥机制
+
+API 执行遵循严格的互斥规则：
+
+- API 禁止并发执行，同一时间只能有一个 API 命令在运行
+- API 和 Web 用户手动输入不能并发 — 如果用户正在操作终端，API 请求会立即拒绝（不排队）
+- API 执行期间，Web 终端的用户输入会被阻止，页面顶部显示"API 执行中"指示器
+- 每次 API 执行前会自动探测 Shell 环境，如果终端处于交互程序中（vim、tmux、mysql 等），API 会拒绝执行
+
+### API 端点
+
+#### GET /api/v1/status
+
+获取终端当前状态。
+
+```sh
+curl http://localhost:8080/api/v1/status
+```
+
+响应示例：
+
+```json
+{
+  "state": "idle",
+  "connected_clients": 2,
+  "terminal_size": {"cols": 120, "rows": 35},
+  "details": {
+    "state": "idle",
+    "last_user_input": "2025-01-01T12:00:00Z",
+    "idle_ms": 5000
+  }
+}
+```
+
+`state` 取值：`idle`（空闲）、`user_active`（用户活跃）、`api_executing`（API 执行中）。
+
+#### POST /api/v1/input
+
+模拟键盘输入。支持文本、特殊键和 Ctrl 组合键。
+
+```sh
+# 输入文本
+curl -X POST http://localhost:8080/api/v1/input \
+  -d '{"type":"text","data":"ls -la"}'
+
+# 按回车
+curl -X POST http://localhost:8080/api/v1/input \
+  -d '{"type":"key","data":"enter"}'
+
+# Ctrl+C
+curl -X POST http://localhost:8080/api/v1/input \
+  -d '{"type":"ctrl","data":"c"}'
+```
+
+支持的 `type` 值：
+
+| type | data | 说明 |
+|------|------|------|
+| `text` | 任意字符串 | 直接输入文本 |
+| `key` | `enter`, `tab`, `backspace`, `escape`, `up`, `down`, `left`, `right`, `home`, `end`, `delete`, `space` | 特殊键 |
+| `ctrl` | `a`-`z` | Ctrl 组合键 |
+
+#### POST /api/v1/exec
+
+执行命令并等待完成，返回完整结果。命令会在 Web 终端中可见。
+
+```sh
+curl -X POST http://localhost:8080/api/v1/exec \
+  -d '{"command":"ls -la","timeout":10}'
+```
+
+响应示例：
+
+```json
+{
+  "exec_id": "exec_a1b2c3d4",
+  "command": "ls -la",
+  "exit_code": 0,
+  "output": "total 48\ndrwxr-xr-x 12 user user 4096 ...",
+  "duration_ms": 150,
+  "timed_out": false
+}
+```
+
+错误响应（终端忙）：
+
+```json
+{"code": "TERMINAL_BUSY", "message": "terminal is in use by user (last input 500ms ago)"}
+```
+
+错误响应（探测失败）：
+
+```json
+{"code": "PROBE_FAILED", "message": "probe timeout (500ms) — terminal may be in an interactive application (vim, less, etc.)"}
+```
+
+#### POST /api/v1/exec/stream
+
+执行命令并通过 SSE (Server-Sent Events) 流式返回输出。
+
+```sh
+curl -X POST http://localhost:8080/api/v1/exec/stream \
+  -d '{"command":"ping -c 3 localhost","timeout":30}'
+```
+
+SSE 事件流：
+
+```
+event: started
+data: {"type":"started","exec_id":"exec_a1b2c3d4","command":"ping -c 3 localhost"}
+
+event: output
+data: {"type":"output","content":"PING localhost (127.0.0.1) 56(84) bytes of data.\n"}
+
+event: output
+data: {"type":"output","content":"64 bytes from localhost: icmp_seq=1 ttl=64 time=0.025 ms\n"}
+
+event: completed
+data: {"type":"completed","exec_id":"exec_a1b2c3d4","exit_code":0,"duration_ms":3012}
+```
+
+#### GET /api/v1/output/lines
+
+获取终端最近 N 行输出。
+
+```sh
+# 获取最近 20 行
+curl http://localhost:8080/api/v1/output/lines?n=20
+```
+
+响应示例：
+
+```json
+{
+  "lines": ["user@host:~$ ls", "file1.txt  file2.txt", "user@host:~$"],
+  "total": 3
+}
+```
+
+`n` 默认 50，最大 1000。
+
+### API 配置参数
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `--enable-api` | `false` | 启用 REST API |
+| `--api-token` | 空 | API 认证令牌，为空则不鉴权 |
+| `--api-probe-timeout` | `500` | Shell 探测超时（毫秒），超时则认为终端处于交互程序中 |
+| `--api-user-idle-ms` | `2000` | 用户空闲判定超时（毫秒），用户最后输入超过此时间后状态回到 idle |
+| `--api-exec-timeout` | `30` | 命令执行默认超时（秒），可在请求中通过 `timeout` 字段覆盖 |
 
 ## 安全建议
 
@@ -592,19 +792,30 @@ make
 gotty/
 ├── main.go              # 程序入口
 ├── server/             # HTTP/WebSocket 服务器
+│   ├── server.go       # 服务器核心与路由注册
+│   ├── api_handler.go  # REST API 端点处理
+│   ├── exec_manager.go # API 命令执行与 marker 检测
+│   ├── probe.go        # Shell 环境探测（静默）
+│   ├── terminal_state.go # 终端状态机与互斥锁
+│   ├── broadcast_controller.go # 广播暂停控制（探测隐藏）
+│   ├── client_handler.go # WebSocket 客户端输入处理
+│   ├── session_manager.go # 会话管理与多客户端广播
+│   ├── slave_reader.go # PTY 输出读取与分发
+│   ├── history_buffer.go # 终端输出历史缓冲
+│   └── options.go      # 配置选项定义与校验
 ├── webtty/             # WebTTY 核心逻辑
 ├── backend/            # 后端接口定义
 ├── js/                 # 前端源代码
 │   ├── src/
 │   │   ├── main.ts     # 前端入口
-│   │   ├── xterm.tsx   # 终端组件
+│   │   ├── xterm.tsx   # 终端组件（含 API 执行指示器）
 │   │   ├── zmodem.tsx  # 文件传输
-│   │   └── webtty.ts   # WebSocket 通信
+│   │   └── webtty.tsx  # WebSocket 通信（含 API 通知处理）
 │   ├── package.json
 │   └── webpack.config.js
 ├── resources/          # 静态资源
 ├── bindata/           # 打包后的静态文件
-└── Makefile
+└── build.sh           # 构建脚本
 ```
 
 ### 开发环境设置

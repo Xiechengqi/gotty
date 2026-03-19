@@ -46,6 +46,12 @@ type Options struct {
 	IdleAlertTimeout    int    `hcl:"idle_alert_timeout" flagName:"idle-alert-timeout" flagDescribe:"Idle alert timeout in seconds" default:"30"`
 	Quiet               bool   `hcl:"quiet" flagName:"quiet" flagDescribe:"Don't log" default:"false"`
 
+	EnableAPI      bool   `hcl:"enable_api" flagName:"enable-api" flagDescribe:"Enable REST API for terminal control" default:"false"`
+	APIToken       string `hcl:"api_token" flagName:"api-token" flagDescribe:"API authentication token (required when enable-api is true)" default:""`
+	ProbeTimeoutMs int    `hcl:"probe_timeout_ms" flagName:"api-probe-timeout" flagDescribe:"Shell probe timeout in milliseconds" default:"500"`
+	UserIdleMs     int    `hcl:"user_idle_ms" flagName:"api-user-idle-ms" flagDescribe:"User idle timeout in milliseconds for API lock" default:"2000"`
+	ExecTimeoutSec int    `hcl:"exec_timeout_sec" flagName:"api-exec-timeout" flagDescribe:"Default API command execution timeout in seconds" default:"30"`
+
 	EnableASR  bool   `hcl:"enable_asr" flagName:"enable-asr" flagDescribe:"Enable voice input UI and ASR proxy endpoint" default:"false"`
 	ASRBackend string `hcl:"asr_backend" flagName:"asr-backend" flagDescribe:"WebSocket address of sherpa-onnx streaming_server (e.g. ws://127.0.0.1:6006)" default:"ws://127.0.0.1:6006"`
 	ASRHoldMs  int    `hcl:"asr_hold_ms" flagName:"asr-hold-ms" flagDescribe:"Hold duration (ms) for ASR hotkey to start recording" default:"500"`
@@ -90,6 +96,17 @@ func (options *Options) Validate() error {
 	}
 	if options.LeaderIdleMs < 0 {
 		return errors.New("leader-idle-ms must be >= 0")
+	}
+	if options.EnableAPI {
+		if options.ProbeTimeoutMs <= 0 {
+			return errors.New("api-probe-timeout must be > 0 when API is enabled")
+		}
+		if options.UserIdleMs <= 0 {
+			return errors.New("api-user-idle-ms must be > 0 when API is enabled")
+		}
+		if options.ExecTimeoutSec <= 0 {
+			return errors.New("api-exec-timeout must be > 0 when API is enabled")
+		}
 	}
 	return nil
 }
