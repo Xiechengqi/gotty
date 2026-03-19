@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/json"
 	"html/template"
 	"io/fs"
@@ -143,7 +144,14 @@ func (server *Server) Run(ctx context.Context, options ...RunOption) error {
 			server.sessionManager.NotifyClients('9', payload)
 		}
 
-		server.execManager = NewExecManager(slave, server.terminalStatus, probeManager, server.broadcastCtrl, notifyFn)
+		replayFn := func(raw []byte) {
+			encoded := make([]byte, base64.StdEncoding.EncodedLen(len(raw))+1)
+			encoded[0] = '1'
+			base64.StdEncoding.Encode(encoded[1:], raw)
+			server.sessionManager.broadcast <- encoded
+		}
+
+		server.execManager = NewExecManager(slave, server.terminalStatus, probeManager, server.broadcastCtrl, notifyFn, replayFn)
 		log.Printf("API enabled")
 	}
 

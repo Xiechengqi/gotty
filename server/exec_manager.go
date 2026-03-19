@@ -20,19 +20,21 @@ type ExecManager struct {
 	probe         *ProbeManager
 	broadcastCtrl *BroadcastController
 	notifyFn      func(execID, status string) // notify Web clients
+	replayFn      func(raw []byte)            // replay raw output to Web clients
 
 	mu        sync.Mutex
 	rawOutput chan []byte // active during execution
 }
 
 // NewExecManager creates a new ExecManager.
-func NewExecManager(slave Slave, status *TerminalStatus, probe *ProbeManager, bc *BroadcastController, notifyFn func(string, string)) *ExecManager {
+func NewExecManager(slave Slave, status *TerminalStatus, probe *ProbeManager, bc *BroadcastController, notifyFn func(string, string), replayFn func([]byte)) *ExecManager {
 	return &ExecManager{
 		slave:         slave,
 		status:        status,
 		probe:         probe,
 		broadcastCtrl: bc,
 		notifyFn:      notifyFn,
+		replayFn:      replayFn,
 	}
 }
 
@@ -141,6 +143,14 @@ func (em *ExecManager) Execute(ctx context.Context, req ExecRequest, defaultTime
 				duration := time.Since(startTime).Milliseconds()
 				output := extractOutput(buf, marker)
 
+				// Replay clean output to Web clients before resuming broadcast
+				if em.replayFn != nil {
+					cleanRaw := extractRawForReplay(buf, marker)
+					if len(cleanRaw) > 0 {
+						em.replayFn(cleanRaw)
+					}
+				}
+
 				em.broadcastCtrl.Resume()
 				log.Printf("[API Exec] Completed: id=%s exit_code=%d duration=%dms", execID, exitCode, duration)
 				return &ExecResult{
@@ -236,6 +246,14 @@ func (em *ExecManager) ExecuteStream(ctx context.Context, req ExecRequest, defau
 				exitCodeStr := string(buf[loc[2]:loc[3]])
 				exitCode, _ := strconv.Atoi(exitCodeStr)
 				duration := time.Since(startTime).Milliseconds()
+
+				// Replay clean output to Web clients before resuming broadcast
+				if em.replayFn != nil {
+					cleanRaw := extractRawForReplay(buf, marker)
+					if len(cleanRaw) > 0 {
+						em.replayFn(cleanRaw)
+					}
+				}
 
 				em.broadcastCtrl.Resume()
 				eventCh <- OutputEvent{
@@ -363,6 +381,26 @@ func joinTrimmed(lines []string) string {
 		result += line
 	}
 	return result
+}
+
+// extractRawForReplay returns the raw PTY output with marker-related lines removed,
+// suitable for replaying to Web clients. Preserves original bytes including ANSI codes.
+func extractRawForReplay(buf []byte, marker string) []byte {
+	lines := bytes.Split(buf, []byte("\n"))
+	var result [][]byte
+
+	for _, line := range lines {
+		// Skip lines containing the marker or compound command echo
+		if bytes.Contains(line, []byte(marker)) {
+			continue
+		}
+		if bytes.Contains(line, []byte("<<<GOTTY_EXIT:")) {
+			continue
+		}
+		result = append(result, line)
+	}
+
+	return bytes.Join(result, []byte("\n"))
 }
 
 // ExecError represents an API execution error.
