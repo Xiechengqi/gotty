@@ -112,15 +112,15 @@ func (em *ExecManager) Execute(ctx context.Context, req ExecRequest, defaultTime
 
 	startTime := time.Now()
 
-	// 5. Pause broadcast for entire execution (+ 5s safety margin)
-	em.broadcastCtrl.PauseFor(timeout + 5*time.Second)
-	defer em.broadcastCtrl.Resume()
+	// 5. Pause broadcast for entire execution (+ 10s safety margin for cleanup)
+	em.broadcastCtrl.PauseFor(timeout + 10*time.Second)
 
-	// 6. Send compound command: user command && marker || marker
+	// 6. Send compound command: user command ; marker
 	marker := fmt.Sprintf("<<<GOTTY_EXIT:%s:", execID)
 	markerPattern := regexp.MustCompile(fmt.Sprintf(`<<<GOTTY_EXIT:%s:(\d+)>>>`, regexp.QuoteMeta(execID)))
 	compound := fmt.Sprintf("%s; echo \"%s$?>>>\"\r", req.Command, marker)
 	if _, err := em.slave.Write([]byte(compound)); err != nil {
+		em.broadcastCtrl.Resume()
 		return nil, fmt.Errorf("failed to write command: %w", err)
 	}
 
@@ -130,6 +130,7 @@ func (em *ExecManager) Execute(ctx context.Context, req ExecRequest, defaultTime
 		select {
 		case data, ok := <-outputCh:
 			if !ok {
+				em.broadcastCtrl.Resume()
 				return nil, fmt.Errorf("output channel closed")
 			}
 			buf = append(buf, data...)
@@ -140,6 +141,7 @@ func (em *ExecManager) Execute(ctx context.Context, req ExecRequest, defaultTime
 				duration := time.Since(startTime).Milliseconds()
 				output := extractOutput(buf, marker)
 
+				em.broadcastCtrl.Resume()
 				log.Printf("[API Exec] Completed: id=%s exit_code=%d duration=%dms", execID, exitCode, duration)
 				return &ExecResult{
 					ExecID:     execID,
@@ -152,6 +154,10 @@ func (em *ExecManager) Execute(ctx context.Context, req ExecRequest, defaultTime
 
 		case <-execCtx.Done():
 			log.Printf("[API Exec] Timeout: id=%s timeout=%v", execID, timeout)
+			// Send Ctrl+C to interrupt, then drain remaining output
+			em.slave.Write([]byte("\x03"))
+			em.drainOutput(outputCh, markerPattern, 3*time.Second)
+			em.broadcastCtrl.Resume()
 			return &ExecResult{
 				ExecID:     execID,
 				Command:    req.Command,
@@ -203,15 +209,15 @@ func (em *ExecManager) ExecuteStream(ctx context.Context, req ExecRequest, defau
 
 	startTime := time.Now()
 
-	// 6. Pause broadcast for entire execution (+ 5s safety margin)
-	em.broadcastCtrl.PauseFor(timeout + 5*time.Second)
-	defer em.broadcastCtrl.Resume()
+	// 6. Pause broadcast for entire execution (+ 10s safety margin for cleanup)
+	em.broadcastCtrl.PauseFor(timeout + 10*time.Second)
 
 	// 7. Send compound command: user command ; marker
 	marker := fmt.Sprintf("<<<GOTTY_EXIT:%s:", execID)
 	markerPattern := regexp.MustCompile(fmt.Sprintf(`<<<GOTTY_EXIT:%s:(\d+)>>>`, regexp.QuoteMeta(execID)))
 	compound := fmt.Sprintf("%s; echo \"%s$?>>>\"\r", req.Command, marker)
 	if _, err := em.slave.Write([]byte(compound)); err != nil {
+		em.broadcastCtrl.Resume()
 		return fmt.Errorf("failed to write command: %w", err)
 	}
 
@@ -221,6 +227,7 @@ func (em *ExecManager) ExecuteStream(ctx context.Context, req ExecRequest, defau
 		select {
 		case data, ok := <-outputCh:
 			if !ok {
+				em.broadcastCtrl.Resume()
 				return fmt.Errorf("output channel closed")
 			}
 			buf = append(buf, data...)
@@ -230,6 +237,7 @@ func (em *ExecManager) ExecuteStream(ctx context.Context, req ExecRequest, defau
 				exitCode, _ := strconv.Atoi(exitCodeStr)
 				duration := time.Since(startTime).Milliseconds()
 
+				em.broadcastCtrl.Resume()
 				eventCh <- OutputEvent{
 					Type: "completed",
 					ExecResult: ExecResult{
@@ -242,13 +250,17 @@ func (em *ExecManager) ExecuteStream(ctx context.Context, req ExecRequest, defau
 				return nil
 			}
 
-			// Stream output to SSE client (filter marker lines later if needed)
+			// Stream output to SSE client
 			eventCh <- OutputEvent{
 				Type:    "output",
 				Content: string(data),
 			}
 
 		case <-execCtx.Done():
+			// Send Ctrl+C to interrupt, then drain remaining output
+			em.slave.Write([]byte("\x03"))
+			em.drainOutput(outputCh, markerPattern, 3*time.Second)
+			em.broadcastCtrl.Resume()
 			eventCh <- OutputEvent{
 				Type: "completed",
 				ExecResult: ExecResult{
@@ -276,6 +288,28 @@ func (em *ExecManager) disableOutputTap() {
 	if em.rawOutput != nil {
 		close(em.rawOutput)
 		em.rawOutput = nil
+	}
+}
+
+// drainOutput reads and discards remaining PTY output until the marker is seen
+// or the deadline expires. This prevents marker text from leaking to web clients
+// after broadcast resumes.
+func (em *ExecManager) drainOutput(outputCh <-chan []byte, markerPattern *regexp.Regexp, deadline time.Duration) {
+	timer := time.After(deadline)
+	var buf []byte
+	for {
+		select {
+		case data, ok := <-outputCh:
+			if !ok {
+				return
+			}
+			buf = append(buf, data...)
+			if markerPattern.Find(buf) != nil {
+				return
+			}
+		case <-timer:
+			return
+		}
 	}
 }
 
