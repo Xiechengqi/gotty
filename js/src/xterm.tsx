@@ -413,7 +413,7 @@ export class GoTTYXterm {
         this.apiIndicatorElem = elem.ownerDocument.createElement("div");
         this.apiIndicatorElem.className = "gotty-api-indicator";
         this.apiIndicatorElem.innerHTML = '<span class="api-indicator-dot"></span> API 执行中';
-        elem.appendChild(this.apiIndicatorElem);
+        document.body.appendChild(this.apiIndicatorElem);
 
         // Auto-copy selection to clipboard
         this.term.onSelectionChange(() => {

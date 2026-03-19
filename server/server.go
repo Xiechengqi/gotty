@@ -143,7 +143,7 @@ func (server *Server) Run(ctx context.Context, options ...RunOption) error {
 			server.sessionManager.NotifyClients('9', payload)
 		}
 
-		server.execManager = NewExecManager(slave, server.terminalStatus, probeManager, notifyFn)
+		server.execManager = NewExecManager(slave, server.terminalStatus, probeManager, server.broadcastCtrl, notifyFn)
 		log.Printf("API enabled")
 	}
 
