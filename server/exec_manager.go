@@ -76,8 +76,8 @@ type OutputEvent struct {
 }
 
 // Execute runs a command and waits for completion. Non-streaming.
-// Phase 1: Send user command with broadcast ON (Web visible).
-// Phase 2: Pause broadcast, send marker echo (Web invisible), detect completion.
+// Broadcast is paused for the entire execution so nothing is visible to Web clients.
+// The API indicator overlay tells Web users that an API command is running.
 func (em *ExecManager) Execute(ctx context.Context, req ExecRequest, defaultTimeout int) (*ExecResult, error) {
 	execID := "exec_" + randomstring.Generate(8)
 	timeout := time.Duration(defaultTimeout) * time.Second
@@ -112,18 +112,20 @@ func (em *ExecManager) Execute(ctx context.Context, req ExecRequest, defaultTime
 
 	startTime := time.Now()
 
-	// 5. Phase 1: Send user command (broadcast ON, Web visible)
-	if _, err := em.slave.Write([]byte(req.Command + "\r")); err != nil {
+	// 5. Pause broadcast for entire execution (+ 5s safety margin)
+	em.broadcastCtrl.PauseFor(timeout + 5*time.Second)
+	defer em.broadcastCtrl.Resume()
+
+	// 6. Send compound command: user command && marker || marker
+	marker := fmt.Sprintf("<<<GOTTY_EXIT:%s:", execID)
+	markerPattern := regexp.MustCompile(fmt.Sprintf(`<<<GOTTY_EXIT:%s:(\d+)>>>`, regexp.QuoteMeta(execID)))
+	compound := fmt.Sprintf("%s; echo \"%s$?>>>\"\r", req.Command, marker)
+	if _, err := em.slave.Write([]byte(compound)); err != nil {
 		return nil, fmt.Errorf("failed to write command: %w", err)
 	}
 
-	// 6. Collect output until idle, then enter Phase 2
+	// 7. Collect output until marker detected
 	var buf []byte
-	marker := fmt.Sprintf("<<<GOTTY_EXIT:%s:", execID)
-	markerPattern := regexp.MustCompile(fmt.Sprintf(`<<<GOTTY_EXIT:%s:(\d+)>>>`, regexp.QuoteMeta(execID)))
-	idleTimeout := 50 * time.Millisecond
-	markerSent := false
-
 	for {
 		select {
 		case data, ok := <-outputCh:
@@ -132,44 +134,23 @@ func (em *ExecManager) Execute(ctx context.Context, req ExecRequest, defaultTime
 			}
 			buf = append(buf, data...)
 
-			// Check for marker (Phase 2)
-			if markerSent {
-				if loc := markerPattern.FindSubmatchIndex(buf); loc != nil {
-					exitCodeStr := string(buf[loc[2]:loc[3]])
-					exitCode, _ := strconv.Atoi(exitCodeStr)
-					duration := time.Since(startTime).Milliseconds()
+			if loc := markerPattern.FindSubmatchIndex(buf); loc != nil {
+				exitCodeStr := string(buf[loc[2]:loc[3]])
+				exitCode, _ := strconv.Atoi(exitCodeStr)
+				duration := time.Since(startTime).Milliseconds()
+				output := extractOutput(buf, marker)
 
-					em.broadcastCtrl.Resume()
-					output := extractOutput(buf, marker)
-
-					log.Printf("[API Exec] Completed: id=%s exit_code=%d duration=%dms", execID, exitCode, duration)
-					return &ExecResult{
-						ExecID:     execID,
-						Command:    req.Command,
-						ExitCode:   exitCode,
-						Output:     output,
-						DurationMs: duration,
-					}, nil
-				}
+				log.Printf("[API Exec] Completed: id=%s exit_code=%d duration=%dms", execID, exitCode, duration)
+				return &ExecResult{
+					ExecID:     execID,
+					Command:    req.Command,
+					ExitCode:   exitCode,
+					Output:     output,
+					DurationMs: duration,
+				}, nil
 			}
-
-		case <-time.After(idleTimeout):
-			if !markerSent {
-				// Phase 2: output idle — pause broadcast and send marker
-				em.broadcastCtrl.Pause()
-				markerCmd := fmt.Sprintf("echo \"%s$?>>>\"\r", marker)
-				if _, err := em.slave.Write([]byte(markerCmd)); err != nil {
-					em.broadcastCtrl.Resume()
-					return nil, fmt.Errorf("failed to write marker: %w", err)
-				}
-				markerSent = true
-			}
-			// If marker already sent, keep waiting for marker output
 
 		case <-execCtx.Done():
-			if markerSent {
-				em.broadcastCtrl.Resume()
-			}
 			log.Printf("[API Exec] Timeout: id=%s timeout=%v", execID, timeout)
 			return &ExecResult{
 				ExecID:     execID,
@@ -184,8 +165,7 @@ func (em *ExecManager) Execute(ctx context.Context, req ExecRequest, defaultTime
 }
 
 // ExecuteStream runs a command and streams output via a channel.
-// Phase 1: Send user command with broadcast ON (Web visible), stream output.
-// Phase 2: Pause broadcast, send marker echo (Web invisible), detect completion.
+// Broadcast is paused for the entire execution so nothing is visible to Web clients.
 func (em *ExecManager) ExecuteStream(ctx context.Context, req ExecRequest, defaultTimeout int, eventCh chan<- OutputEvent) error {
 	execID := "exec_" + randomstring.Generate(8)
 	timeout := time.Duration(defaultTimeout) * time.Second
@@ -223,18 +203,20 @@ func (em *ExecManager) ExecuteStream(ctx context.Context, req ExecRequest, defau
 
 	startTime := time.Now()
 
-	// 6. Phase 1: Send user command (broadcast ON)
-	if _, err := em.slave.Write([]byte(req.Command + "\r")); err != nil {
+	// 6. Pause broadcast for entire execution (+ 5s safety margin)
+	em.broadcastCtrl.PauseFor(timeout + 5*time.Second)
+	defer em.broadcastCtrl.Resume()
+
+	// 7. Send compound command: user command ; marker
+	marker := fmt.Sprintf("<<<GOTTY_EXIT:%s:", execID)
+	markerPattern := regexp.MustCompile(fmt.Sprintf(`<<<GOTTY_EXIT:%s:(\d+)>>>`, regexp.QuoteMeta(execID)))
+	compound := fmt.Sprintf("%s; echo \"%s$?>>>\"\r", req.Command, marker)
+	if _, err := em.slave.Write([]byte(compound)); err != nil {
 		return fmt.Errorf("failed to write command: %w", err)
 	}
 
-	// 7. Collect and stream output
+	// 8. Collect and stream output
 	var buf []byte
-	marker := fmt.Sprintf("<<<GOTTY_EXIT:%s:", execID)
-	markerPattern := regexp.MustCompile(fmt.Sprintf(`<<<GOTTY_EXIT:%s:(\d+)>>>`, regexp.QuoteMeta(execID)))
-	idleTimeout := 50 * time.Millisecond
-	markerSent := false
-
 	for {
 		select {
 		case data, ok := <-outputCh:
@@ -243,50 +225,30 @@ func (em *ExecManager) ExecuteStream(ctx context.Context, req ExecRequest, defau
 			}
 			buf = append(buf, data...)
 
-			// Check for marker (Phase 2)
-			if markerSent {
-				if loc := markerPattern.FindSubmatchIndex(buf); loc != nil {
-					exitCodeStr := string(buf[loc[2]:loc[3]])
-					exitCode, _ := strconv.Atoi(exitCodeStr)
-					duration := time.Since(startTime).Milliseconds()
+			if loc := markerPattern.FindSubmatchIndex(buf); loc != nil {
+				exitCodeStr := string(buf[loc[2]:loc[3]])
+				exitCode, _ := strconv.Atoi(exitCodeStr)
+				duration := time.Since(startTime).Milliseconds()
 
-					em.broadcastCtrl.Resume()
-
-					eventCh <- OutputEvent{
-						Type: "completed",
-						ExecResult: ExecResult{
-							ExecID:     execID,
-							ExitCode:   exitCode,
-							DurationMs: duration,
-						},
-					}
-					log.Printf("[API Exec Stream] Completed: id=%s exit_code=%d duration=%dms", execID, exitCode, duration)
-					return nil
-				}
-			} else {
-				// Phase 1: stream output to SSE client
 				eventCh <- OutputEvent{
-					Type:    "output",
-					Content: string(data),
+					Type: "completed",
+					ExecResult: ExecResult{
+						ExecID:     execID,
+						ExitCode:   exitCode,
+						DurationMs: duration,
+					},
 				}
+				log.Printf("[API Exec Stream] Completed: id=%s exit_code=%d duration=%dms", execID, exitCode, duration)
+				return nil
 			}
 
-		case <-time.After(idleTimeout):
-			if !markerSent {
-				// Phase 2: output idle — pause broadcast and send marker
-				em.broadcastCtrl.Pause()
-				markerCmd := fmt.Sprintf("echo \"%s$?>>>\"\r", marker)
-				if _, err := em.slave.Write([]byte(markerCmd)); err != nil {
-					em.broadcastCtrl.Resume()
-					return fmt.Errorf("failed to write marker: %w", err)
-				}
-				markerSent = true
+			// Stream output to SSE client (filter marker lines later if needed)
+			eventCh <- OutputEvent{
+				Type:    "output",
+				Content: string(data),
 			}
 
 		case <-execCtx.Done():
-			if markerSent {
-				em.broadcastCtrl.Resume()
-			}
 			eventCh <- OutputEvent{
 				Type: "completed",
 				ExecResult: ExecResult{

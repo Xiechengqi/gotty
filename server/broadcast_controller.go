@@ -25,6 +25,11 @@ func NewBroadcastController() *BroadcastController {
 // Pause stops broadcasting to Web clients. PTY output during pause
 // is redirected to the internal channel for probe validation.
 func (bc *BroadcastController) Pause() {
+	bc.PauseFor(bc.maxPause)
+}
+
+// PauseFor stops broadcasting with a custom safety timeout.
+func (bc *BroadcastController) PauseFor(d time.Duration) {
 	bc.mu.Lock()
 	defer bc.mu.Unlock()
 
@@ -34,8 +39,8 @@ func (bc *BroadcastController) Pause() {
 	bc.paused = true
 	bc.internal = make(chan []byte, 64)
 
-	// Safety: force resume after maxPause
-	bc.timer = time.AfterFunc(bc.maxPause, func() {
+	// Safety: force resume after timeout
+	bc.timer = time.AfterFunc(d, func() {
 		bc.Resume()
 	})
 }
