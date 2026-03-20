@@ -67,9 +67,8 @@ export function installFaviconAlert(options: FaviconAlertOptions): () => void {
     const pngUrlCache: Partial<Record<FaviconColor, string>> = {};
     let lastColor: FaviconColor | null = null;
 
-    const isEmbedded = window.parent !== window;
     let hasFocus = document.hasFocus();
-    let isViewing = !isEmbedded && document.visibilityState === 'visible' && hasFocus;
+    let isViewing = document.visibilityState === 'visible' && hasFocus;
 
     let isActive = false;
     let needsAttention = false;
@@ -167,7 +166,7 @@ export function installFaviconAlert(options: FaviconAlertOptions): () => void {
     };
 
     const updateViewing = () => {
-        const nextIsViewing = !isEmbedded && document.visibilityState === 'visible' && hasFocus;
+        const nextIsViewing = document.visibilityState === 'visible' && hasFocus;
         if (nextIsViewing === isViewing) return;
 
         isViewing = nextIsViewing;
