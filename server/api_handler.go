@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -278,6 +279,13 @@ func (server *Server) handleAPIOutputLines(w http.ResponseWriter, r *http.Reques
 	}
 	lines := allLines[start:]
 
+	// Optionally strip ANSI escape sequences
+	if r.URL.Query().Get("strip_ansi") == "true" {
+		for i := range lines {
+			lines[i] = stripAnsi(lines[i])
+		}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"lines": lines,
@@ -374,4 +382,12 @@ func writeAPIError(w http.ResponseWriter, status int, code, message string) {
 		"message": message,
 	})
 	log.Printf("[API Error] %d %s: %s", status, code, message)
+}
+
+// ansiPattern matches ANSI escape sequences (CSI, OSC, and single ESC sequences).
+var ansiPattern = regexp.MustCompile(`\x1b(?:\[[0-9;]*[a-zA-Z@]|\][^\x07]*\x07|\[[^\x1b]*|.)`)
+
+// stripAnsi removes ANSI escape sequences from a string.
+func stripAnsi(s string) string {
+	return ansiPattern.ReplaceAllString(s, "")
 }

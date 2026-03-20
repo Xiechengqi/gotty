@@ -139,7 +139,7 @@ func (em *ExecManager) Execute(ctx context.Context, req ExecRequest, defaultTime
 	// 9. Send marker command (hidden from web)
 	marker := fmt.Sprintf("<<<GOTTY_EXIT:%s:", execID)
 	markerPattern := regexp.MustCompile(fmt.Sprintf(`<<<GOTTY_EXIT:%s:(\d+)>>>`, regexp.QuoteMeta(execID)))
-	markerCmd := fmt.Sprintf("echo \"%s$?>>>\"\r", marker)
+	markerCmd := fmt.Sprintf(" echo \"%s$?>>>\"\r", marker)
 	if _, err := em.slave.Write([]byte(markerCmd)); err != nil {
 		em.broadcastCtrl.Resume()
 		return nil, fmt.Errorf("failed to write marker command: %w", err)
@@ -308,7 +308,7 @@ func (em *ExecManager) ExecuteStream(ctx context.Context, req ExecRequest, defau
 	// 9. Send marker command (hidden)
 	marker := fmt.Sprintf("<<<GOTTY_EXIT:%s:", execID)
 	markerPattern := regexp.MustCompile(fmt.Sprintf(`<<<GOTTY_EXIT:%s:(\d+)>>>`, regexp.QuoteMeta(execID)))
-	markerCmd := fmt.Sprintf("echo \"%s$?>>>\"\r", marker)
+	markerCmd := fmt.Sprintf(" echo \"%s$?>>>\"\r", marker)
 	if _, err := em.slave.Write([]byte(markerCmd)); err != nil {
 		em.broadcastCtrl.Resume()
 		return fmt.Errorf("failed to write marker command: %w", err)
@@ -351,11 +351,14 @@ func (em *ExecManager) ExecuteStream(ctx context.Context, req ExecRequest, defau
 				return nil
 			}
 
-			// Stream output to SSE client
-			sendEvent(OutputEvent{
-				Type:    "output",
-				Content: string(data),
-			})
+			// Stream output to SSE client (filter marker lines)
+			cleaned := string(stripMarkerLines(data, []byte("<<<GOTTY_EXIT:")))
+			if cleaned != "" {
+				sendEvent(OutputEvent{
+					Type:    "output",
+					Content: cleaned,
+				})
+			}
 
 		case <-execCtx.Done():
 			// Send Ctrl+C to interrupt, then drain remaining output
@@ -448,13 +451,18 @@ func (em *ExecManager) drainOutput(outputCh <-chan []byte, markerPattern *regexp
 	}
 }
 
+// echoTimeout is the maximum time to wait for the command echo before giving up.
+// This is separate from the execution timeout to fail fast on problematic commands.
+const echoTimeout = 5 * time.Second
+
 // waitForEcho reads from the output channel until the command echo is fully
 // received (i.e. the command text followed by a newline). Data consumed here
 // is still broadcast to Web clients because the broadcast controller is not
-// yet paused.
+// yet paused. Uses its own deadline (echoTimeout) in addition to the parent ctx.
 func (em *ExecManager) waitForEcho(outputCh <-chan []byte, ctx context.Context, command string) error {
 	needle := []byte(command)
 	var buf []byte
+	echoDeadline := time.After(echoTimeout)
 	for {
 		select {
 		case data, ok := <-outputCh:
@@ -470,6 +478,8 @@ func (em *ExecManager) waitForEcho(outputCh <-chan []byte, ctx context.Context, 
 					return nil
 				}
 			}
+		case <-echoDeadline:
+			return fmt.Errorf("echo timeout (%v) — command may contain special characters that altered PTY echo", echoTimeout)
 		case <-ctx.Done():
 			return ctx.Err()
 		}

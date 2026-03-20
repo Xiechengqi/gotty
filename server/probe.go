@@ -32,7 +32,7 @@ func NewProbeManager(slave Slave, bc *BroadcastController, timeout time.Duration
 func (pm *ProbeManager) Probe() error {
 	probeID := "probe_" + randomstring.Generate(8)
 	marker := fmt.Sprintf("GOTTY_PROBE_%s", probeID)
-	probeCmd := fmt.Sprintf("echo %s\r", marker)
+	probeCmd := fmt.Sprintf(" echo %s\r", marker)
 
 	// 1. Pause broadcast — Web clients see nothing
 	pm.broadcastCtrl.Pause()
