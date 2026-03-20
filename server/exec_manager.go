@@ -50,6 +50,7 @@ func (em *ExecManager) FeedOutput(data []byte) {
 		select {
 		case em.rawOutput <- cp:
 		default:
+			log.Printf("[API Exec] WARNING: output channel full, data dropped (%d bytes)", len(data))
 		}
 	}
 }
@@ -246,6 +247,16 @@ func (em *ExecManager) ExecuteStream(ctx context.Context, req ExecRequest, defau
 		timeout = time.Duration(req.Timeout) * time.Second
 	}
 
+	// Helper to send events without blocking when client disconnects.
+	sendEvent := func(ev OutputEvent) bool {
+		select {
+		case eventCh <- ev:
+			return true
+		case <-ctx.Done():
+			return false
+		}
+	}
+
 	// 1. Acquire lock
 	ok, reason := em.status.TryAcquireAPI(execID)
 	if !ok {
@@ -269,7 +280,9 @@ func (em *ExecManager) ExecuteStream(ctx context.Context, req ExecRequest, defau
 	defer em.disableOutputTap()
 
 	// 5. Send started event
-	eventCh <- OutputEvent{Type: "started", ExecResult: ExecResult{ExecID: execID, Command: req.Command}}
+	if !sendEvent(OutputEvent{Type: "started", ExecResult: ExecResult{ExecID: execID, Command: req.Command}}) {
+		return ctx.Err()
+	}
 
 	execCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -326,23 +339,23 @@ func (em *ExecManager) ExecuteStream(ctx context.Context, req ExecRequest, defau
 				}
 
 				em.broadcastCtrl.Resume()
-				eventCh <- OutputEvent{
+				sendEvent(OutputEvent{
 					Type: "completed",
 					ExecResult: ExecResult{
 						ExecID:     execID,
 						ExitCode:   exitCode,
 						DurationMs: duration,
 					},
-				}
+				})
 				log.Printf("[API Exec Stream] Completed: id=%s exit_code=%d duration=%dms", execID, exitCode, duration)
 				return nil
 			}
 
 			// Stream output to SSE client
-			eventCh <- OutputEvent{
+			sendEvent(OutputEvent{
 				Type:    "output",
 				Content: string(data),
-			}
+			})
 
 		case <-execCtx.Done():
 			// Send Ctrl+C to interrupt, then drain remaining output
@@ -364,14 +377,14 @@ func (em *ExecManager) ExecuteStream(ctx context.Context, req ExecRequest, defau
 				}
 
 				em.broadcastCtrl.Resume()
-				eventCh <- OutputEvent{
+				sendEvent(OutputEvent{
 					Type: "completed",
 					ExecResult: ExecResult{
 						ExecID:     execID,
 						ExitCode:   exitCode,
 						DurationMs: duration,
 					},
-				}
+				})
 				return nil
 			}
 
@@ -384,7 +397,7 @@ func (em *ExecManager) ExecuteStream(ctx context.Context, req ExecRequest, defau
 			}
 
 			em.broadcastCtrl.Resume()
-			eventCh <- OutputEvent{
+			sendEvent(OutputEvent{
 				Type: "completed",
 				ExecResult: ExecResult{
 					ExecID:     execID,
@@ -392,7 +405,7 @@ func (em *ExecManager) ExecuteStream(ctx context.Context, req ExecRequest, defau
 					DurationMs: time.Since(startTime).Milliseconds(),
 					TimedOut:   true,
 				},
-			}
+			})
 			return nil
 		}
 	}
@@ -401,7 +414,7 @@ func (em *ExecManager) ExecuteStream(ctx context.Context, req ExecRequest, defau
 func (em *ExecManager) enableOutputTap() chan []byte {
 	em.mu.Lock()
 	defer em.mu.Unlock()
-	em.rawOutput = make(chan []byte, 256)
+	em.rawOutput = make(chan []byte, 4096)
 	return em.rawOutput
 }
 

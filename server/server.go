@@ -150,11 +150,19 @@ func (server *Server) Run(ctx context.Context, options ...RunOption) error {
 			encoded := make([]byte, base64.StdEncoding.EncodedLen(len(raw))+1)
 			encoded[0] = '1'
 			base64.StdEncoding.Encode(encoded[1:], raw)
-			server.sessionManager.broadcast <- encoded
+			select {
+			case server.sessionManager.broadcast <- encoded:
+			case <-time.After(5 * time.Second):
+				log.Printf("[API Replay] WARNING: broadcast channel full, replay dropped (%d bytes)", len(raw))
+			}
 		}
 
 		server.execManager = NewExecManager(slave, server.terminalStatus, probeManager, server.broadcastCtrl, notifyFn, replayFn)
-		log.Printf("API enabled")
+		if server.options.Credential == "" {
+			log.Printf("API enabled (default auth token: user:pass)")
+		} else {
+			log.Printf("API enabled (auth via --credential)")
+		}
 	}
 
 	go server.sessionManager.Run()

@@ -68,9 +68,8 @@ func (server *Server) handleClientInput(client *Client, message []byte) {
 			n, err := base64.StdEncoding.Decode(decoded, message[1:])
 			if err == nil && n > 0 {
 				if server.terminalStatus != nil {
-					// Atomically check state, update activity, and write
+					// Atomically check state and update activity; write runs outside lock
 					server.terminalStatus.WriteIfNotExecuting(func() {
-						server.terminalStatus.updateUserActivityLocked()
 						server.sessionManager.slave.Write(decoded[:n])
 					})
 				} else {

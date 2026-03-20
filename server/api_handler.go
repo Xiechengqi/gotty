@@ -25,14 +25,18 @@ type APIStatusResponse struct {
 	Details          map[string]interface{} `json:"details,omitempty"`
 }
 
+// API request limits
+const (
+	maxCommandLen  = 8192 // bytes
+	maxExecTimeout = 600  // seconds (10 minutes)
+)
+
 // wrapAPIAuth wraps an HTTP handler with API token authentication.
 func (server *Server) wrapAPIAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		token := server.options.APIToken
+		token := server.options.Credential
 		if token == "" {
-			// No token configured, allow all
-			next.ServeHTTP(w, r)
-			return
+			token = "user:pass"
 		}
 
 		// Check Authorization header
@@ -125,6 +129,16 @@ func (server *Server) handleAPIExec(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if len(req.Command) > maxCommandLen {
+		writeAPIError(w, http.StatusBadRequest, "INVALID_REQUEST", fmt.Sprintf("command too long (%d bytes, max %d)", len(req.Command), maxCommandLen))
+		return
+	}
+
+	if req.Timeout > maxExecTimeout {
+		writeAPIError(w, http.StatusBadRequest, "INVALID_REQUEST", fmt.Sprintf("timeout too large (%d seconds, max %d)", req.Timeout, maxExecTimeout))
+		return
+	}
+
 	result, err := server.execManager.Execute(r.Context(), req, server.options.ExecTimeoutSec)
 	if err != nil {
 		if execErr, ok := err.(*ExecError); ok {
@@ -172,6 +186,16 @@ func (server *Server) handleAPIExecStream(w http.ResponseWriter, r *http.Request
 
 	if req.Command == "" {
 		writeAPIError(w, http.StatusBadRequest, "INVALID_REQUEST", "command is required")
+		return
+	}
+
+	if len(req.Command) > maxCommandLen {
+		writeAPIError(w, http.StatusBadRequest, "INVALID_REQUEST", fmt.Sprintf("command too long (%d bytes, max %d)", len(req.Command), maxCommandLen))
+		return
+	}
+
+	if req.Timeout > maxExecTimeout {
+		writeAPIError(w, http.StatusBadRequest, "INVALID_REQUEST", fmt.Sprintf("timeout too large (%d seconds, max %d)", req.Timeout, maxExecTimeout))
 		return
 	}
 

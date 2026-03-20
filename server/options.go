@@ -47,7 +47,6 @@ type Options struct {
 	Quiet               bool   `hcl:"quiet" flagName:"quiet" flagDescribe:"Don't log" default:"false"`
 
 	EnableAPI      bool   `hcl:"enable_api" flagName:"enable-api" flagDescribe:"Enable REST API for terminal control" default:"false"`
-	APIToken       string `hcl:"api_token" flagName:"api-token" flagDescribe:"API authentication token (required when enable-api is true)" default:""`
 	ProbeTimeoutMs int    `hcl:"probe_timeout_ms" flagName:"api-probe-timeout" flagDescribe:"Shell probe timeout in milliseconds" default:"500"`
 	UserIdleMs     int    `hcl:"user_idle_ms" flagName:"api-user-idle-ms" flagDescribe:"User idle timeout in milliseconds for API lock" default:"2000"`
 	ExecTimeoutSec int    `hcl:"exec_timeout_sec" flagName:"api-exec-timeout" flagDescribe:"Default API command execution timeout in seconds" default:"30"`

@@ -77,26 +77,6 @@ func (ts *TerminalStatus) Stop() {
 	})
 }
 
-// UpdateUserActivity marks the terminal as user-active.
-// Returns false if API is currently executing (input should be discarded).
-func (ts *TerminalStatus) UpdateUserActivity() bool {
-	ts.mu.Lock()
-	defer ts.mu.Unlock()
-
-	if ts.state == StateAPIExecuting {
-		return false // discard user input during API execution
-	}
-	ts.state = StateUserActive
-	ts.lastUserInput = time.Now()
-	return true
-}
-
-// updateUserActivityLocked updates user activity state. Must be called with ts.mu held.
-func (ts *TerminalStatus) updateUserActivityLocked() {
-	ts.state = StateUserActive
-	ts.lastUserInput = time.Now()
-}
-
 // TryAcquireAPI attempts to acquire the terminal for API execution.
 // Returns (true, "") on success, or (false, reason) on failure.
 func (ts *TerminalStatus) TryAcquireAPI(execID string) (bool, string) {
@@ -130,14 +110,18 @@ func (ts *TerminalStatus) ReleaseAPI(execID string) {
 }
 
 // WriteIfNotExecuting atomically checks that the terminal is not in API execution
-// state and calls writeFn under the lock. Returns false if API is executing.
+// state, updates user activity, and calls writeFn outside the lock.
+// Returns false if API is executing (writeFn is not called).
 func (ts *TerminalStatus) WriteIfNotExecuting(writeFn func()) bool {
 	ts.mu.Lock()
-	defer ts.mu.Unlock()
-
 	if ts.state == StateAPIExecuting {
+		ts.mu.Unlock()
 		return false
 	}
+	ts.state = StateUserActive
+	ts.lastUserInput = time.Now()
+	ts.mu.Unlock()
+
 	writeFn()
 	return true
 }
