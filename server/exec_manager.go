@@ -458,12 +458,12 @@ func joinTrimmed(lines []string) string {
 }
 
 // buildReplayOutput extracts raw PTY bytes to replay to Web clients after an API exec.
-// Since the command echo was already broadcast in real-time, this only includes:
+// Since the command echo was already broadcast in real-time, this includes:
 //   - The command output between the marker echo line and the marker result line
-//   - Post-marker data (bracket-paste-on, new prompt, etc.)
+//   - Post-marker data (bracket-paste-on, prompt) with marker lines stripped
 //
-// The buf here starts from when broadcast was paused (after the user command echo),
-// so it contains the marker echo command, execution output, and marker result.
+// Post-marker data must be replayed because it was consumed from the output tap
+// during the paused period and will not be re-broadcast after Resume().
 func buildReplayOutput(buf []byte, marker string) []byte {
 	var result []byte
 	gottyExit := []byte("<<<GOTTY_EXIT:")
@@ -471,8 +471,7 @@ func buildReplayOutput(buf []byte, marker string) []byte {
 	// Find the marker echo line (first occurrence of <<<GOTTY_EXIT:).
 	echoIdx := bytes.Index(buf, gottyExit)
 	if echoIdx < 0 {
-		// No marker found at all; return everything (fallback).
-		return buf
+		return nil
 	}
 
 	// Find the end of the marker echo line.
@@ -485,24 +484,44 @@ func buildReplayOutput(buf []byte, marker string) []byte {
 	// Find the marker result line (second occurrence of <<<GOTTY_EXIT:).
 	markerResultIdx := bytes.Index(buf[outputStart:], gottyExit)
 	if markerResultIdx < 0 {
-		// Marker result not found (e.g. timeout); include everything after echo.
-		result = append(result, buf[outputStart:]...)
-		return result
+		// Marker result not found (e.g. timeout); include everything after echo
+		// but strip any lines containing the marker.
+		return stripMarkerLines(buf[outputStart:], gottyExit)
 	}
 
 	// Command output between marker echo and marker result.
 	result = append(result, buf[outputStart:outputStart+markerResultIdx]...)
 
-	// Post-marker data (bracket-paste-on, prompt, etc.).
+	// Post-marker data: everything after the marker result line, with any
+	// remaining marker lines stripped (e.g. bash re-echoing the marker command).
 	markerResultAbs := outputStart + markerResultIdx
 	nlAfterMarker := bytes.IndexByte(buf[markerResultAbs:], '\n')
 	if nlAfterMarker >= 0 {
 		afterMarker := markerResultAbs + nlAfterMarker + 1
 		if afterMarker < len(buf) {
-			result = append(result, buf[afterMarker:]...)
+			result = append(result, stripMarkerLines(buf[afterMarker:], gottyExit)...)
 		}
 	}
 
+	return result
+}
+
+// stripMarkerLines removes any lines containing the needle from raw PTY data,
+// preserving all other bytes (including ANSI escapes, \r\n, etc.) verbatim.
+func stripMarkerLines(data []byte, needle []byte) []byte {
+	lines := bytes.Split(data, []byte("\n"))
+	var result []byte
+	first := true
+	for _, line := range lines {
+		if bytes.Contains(line, needle) {
+			continue
+		}
+		if !first {
+			result = append(result, '\n')
+		}
+		result = append(result, line...)
+		first = false
+	}
 	return result
 }
 
