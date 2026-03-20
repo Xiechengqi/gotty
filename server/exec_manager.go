@@ -117,22 +117,25 @@ func (em *ExecManager) Execute(ctx context.Context, req ExecRequest, defaultTime
 
 	startTime := time.Now()
 
-	// 5. Send user command (broadcast still ON — web sees echo in real-time)
+	// 5. Inject [API] prefix on the current prompt line (broadcast still ON)
+	em.injectAPIPrefix()
+
+	// 6. Send user command (broadcast still ON — web sees echo in real-time)
 	userCmd := req.Command + "\r"
 	if _, err := em.slave.Write([]byte(userCmd)); err != nil {
 		return nil, fmt.Errorf("failed to write command: %w", err)
 	}
 
-	// 6. Wait for the command echo line to complete, then pause broadcast.
+	// 7. Wait for the command echo line to complete, then pause broadcast.
 	//    The echo sentinel is the user command text itself in the PTY output.
 	if err := em.waitForEcho(outputCh, execCtx, req.Command); err != nil {
 		return nil, fmt.Errorf("failed waiting for command echo: %w", err)
 	}
 
-	// 7. Pause broadcast — from now on, web clients see nothing until replay.
+	// 8. Pause broadcast — from now on, web clients see nothing until replay.
 	em.broadcastCtrl.PauseFor(timeout + 10*time.Second)
 
-	// 8. Send marker command (hidden from web)
+	// 9. Send marker command (hidden from web)
 	marker := fmt.Sprintf("<<<GOTTY_EXIT:%s:", execID)
 	markerPattern := regexp.MustCompile(fmt.Sprintf(`<<<GOTTY_EXIT:%s:(\d+)>>>`, regexp.QuoteMeta(execID)))
 	markerCmd := fmt.Sprintf("echo \"%s$?>>>\"\r", marker)
@@ -141,7 +144,7 @@ func (em *ExecManager) Execute(ctx context.Context, req ExecRequest, defaultTime
 		return nil, fmt.Errorf("failed to write marker command: %w", err)
 	}
 
-	// 9. Collect output until marker detected
+	// 10. Collect output until marker detected
 	var buf []byte
 	for {
 		select {
@@ -183,22 +186,48 @@ func (em *ExecManager) Execute(ctx context.Context, req ExecRequest, defaultTime
 			em.slave.Write([]byte("\x03"))
 			drainBuf := em.drainOutput(outputCh, markerPattern, 3*time.Second)
 
-			// Replay whatever output was captured to Web clients.
+			// Check if marker appeared during drain (command finished at timeout edge)
+			allBuf := append(buf, drainBuf...)
+			if loc := markerPattern.FindSubmatchIndex(allBuf); loc != nil {
+				// Command actually completed — extract proper output/exit code
+				exitCodeStr := string(allBuf[loc[2]:loc[3]])
+				exitCode, _ := strconv.Atoi(exitCodeStr)
+				duration := time.Since(startTime).Milliseconds()
+				output := extractOutput(allBuf, marker)
+
+				if em.replayFn != nil {
+					replayData := buildReplayOutput(allBuf, marker)
+					if len(replayData) > 0 {
+						em.replayFn(replayData)
+					}
+				}
+
+				em.broadcastCtrl.Resume()
+				log.Printf("[API Exec] Completed at timeout edge: id=%s exit_code=%d duration=%dms", execID, exitCode, duration)
+				return &ExecResult{
+					ExecID:     execID,
+					Command:    req.Command,
+					ExitCode:   exitCode,
+					Output:     output,
+					DurationMs: duration,
+				}, nil
+			}
+
+			// Truly timed out — only use pre-timeout buf for output
+			// (drainBuf contains Ctrl+C echo, bracket paste, prompt — not command output)
 			if em.replayFn != nil {
-				allBuf := append(buf, drainBuf...)
-				replayData := buildReplayOutput(allBuf, marker)
+				replayData := buildReplayOutput(buf, marker)
 				if len(replayData) > 0 {
 					em.replayFn(replayData)
 				}
 			}
 
 			em.broadcastCtrl.Resume()
-			allBuf := append(buf, drainBuf...)
 			return &ExecResult{
 				ExecID:     execID,
 				Command:    req.Command,
 				ExitCode:   -1,
-				Output:     extractOutput(allBuf, marker),
+				Output:     extractOutput(buf, marker),
 				DurationMs: time.Since(startTime).Milliseconds(),
 				TimedOut:   true,
 			}, nil
@@ -247,20 +276,23 @@ func (em *ExecManager) ExecuteStream(ctx context.Context, req ExecRequest, defau
 
 	startTime := time.Now()
 
-	// 6. Send user command (broadcast still ON)
+	// 6. Inject [API] prefix on the current prompt line (broadcast still ON)
+	em.injectAPIPrefix()
+
+	// 7. Send user command (broadcast still ON)
 	userCmd := req.Command + "\r"
 	if _, err := em.slave.Write([]byte(userCmd)); err != nil {
 		return fmt.Errorf("failed to write command: %w", err)
 	}
 
-	// 7. Wait for echo, then pause
+	// 8. Wait for echo, then pause
 	if err := em.waitForEcho(outputCh, execCtx, req.Command); err != nil {
 		return fmt.Errorf("failed waiting for command echo: %w", err)
 	}
 
 	em.broadcastCtrl.PauseFor(timeout + 10*time.Second)
 
-	// 8. Send marker command (hidden)
+	// 9. Send marker command (hidden)
 	marker := fmt.Sprintf("<<<GOTTY_EXIT:%s:", execID)
 	markerPattern := regexp.MustCompile(fmt.Sprintf(`<<<GOTTY_EXIT:%s:(\d+)>>>`, regexp.QuoteMeta(execID)))
 	markerCmd := fmt.Sprintf("echo \"%s$?>>>\"\r", marker)
@@ -269,7 +301,7 @@ func (em *ExecManager) ExecuteStream(ctx context.Context, req ExecRequest, defau
 		return fmt.Errorf("failed to write marker command: %w", err)
 	}
 
-	// 9. Collect and stream output
+	// 10. Collect and stream output
 	var buf []byte
 	for {
 		select {
@@ -317,10 +349,35 @@ func (em *ExecManager) ExecuteStream(ctx context.Context, req ExecRequest, defau
 			em.slave.Write([]byte("\x03"))
 			drainBuf := em.drainOutput(outputCh, markerPattern, 3*time.Second)
 
-			// Replay whatever output was captured to Web clients.
+			// Check if marker appeared during drain (command finished at timeout edge)
+			allBuf := append(buf, drainBuf...)
+			if loc := markerPattern.FindSubmatchIndex(allBuf); loc != nil {
+				exitCodeStr := string(allBuf[loc[2]:loc[3]])
+				exitCode, _ := strconv.Atoi(exitCodeStr)
+				duration := time.Since(startTime).Milliseconds()
+
+				if em.replayFn != nil {
+					replayData := buildReplayOutput(allBuf, marker)
+					if len(replayData) > 0 {
+						em.replayFn(replayData)
+					}
+				}
+
+				em.broadcastCtrl.Resume()
+				eventCh <- OutputEvent{
+					Type: "completed",
+					ExecResult: ExecResult{
+						ExecID:     execID,
+						ExitCode:   exitCode,
+						DurationMs: duration,
+					},
+				}
+				return nil
+			}
+
+			// Truly timed out — only replay pre-timeout output
 			if em.replayFn != nil {
-				allBuf := append(buf, drainBuf...)
-				replayData := buildReplayOutput(allBuf, marker)
+				replayData := buildReplayOutput(buf, marker)
 				if len(replayData) > 0 {
 					em.replayFn(replayData)
 				}
@@ -484,6 +541,28 @@ func stripMarkerLines(data []byte, needle []byte) []byte {
 		first = false
 	}
 	return result
+}
+
+// injectAPIPrefix broadcasts ANSI escape sequences to the web terminal that
+// insert "[API] " at the beginning of the current line (before the prompt).
+// This visually marks the command as API-initiated without needing to know the
+// prompt content. The sequence uses Insert Character (ICH) to push existing
+// content right, then writes the colored prefix.
+func (em *ExecManager) injectAPIPrefix() {
+	if em.replayFn == nil {
+		return
+	}
+	// \x1b[s      — save cursor position
+	// \r          — move to column 0
+	// \x1b[6@     — ICH: insert 6 blank chars, pushing content right
+	// \x1b[1;38;5;208m — bold + orange (256-color)
+	// [API]       — marker text (5 chars)
+	// \x1b[0m     — reset attributes
+	// \x20        — space (6 visible chars total)
+	// \x1b[u      — restore cursor position
+	// \x1b[6C     — move cursor right 6 to compensate for insertion
+	seq := "\x1b[s\r\x1b[6@\x1b[1;38;5;208m[API]\x1b[0m\x20\x1b[u\x1b[6C"
+	em.replayFn([]byte(seq))
 }
 
 // ExecError represents an API execution error.
