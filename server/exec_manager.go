@@ -143,13 +143,11 @@ func (em *ExecManager) Execute(ctx context.Context, req ExecRequest, defaultTime
 				duration := time.Since(startTime).Milliseconds()
 				output := extractOutput(buf, marker)
 
-				// Replay output to Web clients before resuming broadcast.
-				// Use extractOutput so the command echo is preserved, matching what
-				// would have been visible if the command had been typed manually.
+				// Replay to Web clients: command echo + raw output + post-marker data.
 				if em.replayFn != nil {
-					cleanRaw := extractOutput(buf, marker)
-					if len(cleanRaw) > 0 {
-						em.replayFn([]byte(cleanRaw + "\n"))
+					replayData := buildReplayData(buf, marker, req.Command)
+					if len(replayData) > 0 {
+						em.replayFn(replayData)
 					}
 				}
 
@@ -249,12 +247,11 @@ func (em *ExecManager) ExecuteStream(ctx context.Context, req ExecRequest, defau
 				exitCode, _ := strconv.Atoi(exitCodeStr)
 				duration := time.Since(startTime).Milliseconds()
 
-				// Replay output to Web clients before resuming broadcast.
-				// Use extractOutput so the command echo is preserved.
+				// Replay to Web clients: command echo + raw output + post-marker data.
 				if em.replayFn != nil {
-					cleanRaw := extractOutput(buf, marker)
-					if len(cleanRaw) > 0 {
-						em.replayFn([]byte(cleanRaw + "\n"))
+					replayData := buildReplayData(buf, marker, req.Command)
+					if len(replayData) > 0 {
+						em.replayFn(replayData)
 					}
 				}
 
@@ -383,6 +380,54 @@ func joinTrimmed(lines []string) string {
 		}
 		result += line
 	}
+	return result
+}
+
+// buildReplayData constructs raw bytes to replay to Web clients after an API exec.
+// It prepends a clean command echo (so the cursor advances past the prompt),
+// then includes the raw PTY output between the command echo line and the marker
+// result line, and finally any post-marker data (e.g. bracket-paste-on, prompt).
+func buildReplayData(buf []byte, marker string, command string) []byte {
+	var result []byte
+
+	// 1. Clean command echo so xterm cursor moves past the prompt line.
+	result = append(result, []byte(command)...)
+	result = append(result, '\r', '\n')
+
+	// 2. Find end of the command echo line (first \n after the marker appears).
+	markerBytes := []byte(marker)
+	echoIdx := bytes.Index(buf, markerBytes)
+	if echoIdx < 0 {
+		return result
+	}
+	nlAfterEcho := bytes.IndexByte(buf[echoIdx:], '\n')
+	if nlAfterEcho < 0 {
+		return result
+	}
+	startPos := echoIdx + nlAfterEcho + 1
+
+	// 3. Find the marker result line (second occurrence of <<<GOTTY_EXIT: after echo).
+	gottyExit := []byte("<<<GOTTY_EXIT:")
+	markerResultIdx := bytes.Index(buf[startPos:], gottyExit)
+	if markerResultIdx < 0 {
+		// No marker result found; include everything after echo.
+		result = append(result, buf[startPos:]...)
+		return result
+	}
+
+	// 4. Raw output between echo line and marker result line.
+	result = append(result, buf[startPos:startPos+markerResultIdx]...)
+
+	// 5. Post-marker data (bracket-paste-on, prompt, etc.).
+	markerResultAbs := startPos + markerResultIdx
+	nlAfterMarker := bytes.IndexByte(buf[markerResultAbs:], '\n')
+	if nlAfterMarker >= 0 {
+		afterMarker := markerResultAbs + nlAfterMarker + 1
+		if afterMarker < len(buf) {
+			result = append(result, buf[afterMarker:]...)
+		}
+	}
+
 	return result
 }
 
