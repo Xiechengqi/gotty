@@ -143,11 +143,13 @@ func (em *ExecManager) Execute(ctx context.Context, req ExecRequest, defaultTime
 				duration := time.Since(startTime).Milliseconds()
 				output := extractOutput(buf, marker)
 
-				// Replay clean output to Web clients before resuming broadcast
+				// Replay output to Web clients before resuming broadcast.
+				// Use extractOutput so the command echo is preserved, matching what
+				// would have been visible if the command had been typed manually.
 				if em.replayFn != nil {
-					cleanRaw := extractRawForReplay(buf, marker)
+					cleanRaw := extractOutput(buf, marker)
 					if len(cleanRaw) > 0 {
-						em.replayFn(cleanRaw)
+						em.replayFn([]byte(cleanRaw + "\n"))
 					}
 				}
 
@@ -247,11 +249,12 @@ func (em *ExecManager) ExecuteStream(ctx context.Context, req ExecRequest, defau
 				exitCode, _ := strconv.Atoi(exitCodeStr)
 				duration := time.Since(startTime).Milliseconds()
 
-				// Replay clean output to Web clients before resuming broadcast
+				// Replay output to Web clients before resuming broadcast.
+				// Use extractOutput so the command echo is preserved.
 				if em.replayFn != nil {
-					cleanRaw := extractRawForReplay(buf, marker)
+					cleanRaw := extractOutput(buf, marker)
 					if len(cleanRaw) > 0 {
-						em.replayFn(cleanRaw)
+						em.replayFn([]byte(cleanRaw + "\n"))
 					}
 				}
 
@@ -380,33 +383,6 @@ func joinTrimmed(lines []string) string {
 		}
 		result += line
 	}
-	return result
-}
-
-// extractRawForReplay returns clean PTY output suitable for replaying to Web clients.
-// Strips marker-related lines and normalizes CRLF to LF to avoid cursor-overwrite issues.
-func extractRawForReplay(buf []byte, marker string) []byte {
-	lines := bytes.Split(buf, []byte("\n"))
-	var result []byte
-
-	skipMarker := []byte("<<<GOTTY_EXIT:")
-	for i, line := range lines {
-		// Strip trailing \r (from PTY CRLF mode)
-		line = bytes.TrimRight(line, "\r")
-
-		if bytes.Contains(line, []byte(marker)) {
-			continue
-		}
-		if bytes.Contains(line, skipMarker) {
-			continue
-		}
-
-		if i > 0 {
-			result = append(result, '\n')
-		}
-		result = append(result, line...)
-	}
-
 	return result
 }
 
