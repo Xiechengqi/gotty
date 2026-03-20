@@ -383,24 +383,31 @@ func joinTrimmed(lines []string) string {
 	return result
 }
 
-// extractRawForReplay returns the raw PTY output with marker-related lines removed,
-// suitable for replaying to Web clients. Preserves original bytes including ANSI codes.
+// extractRawForReplay returns clean PTY output suitable for replaying to Web clients.
+// Strips marker-related lines and normalizes CRLF to LF to avoid cursor-overwrite issues.
 func extractRawForReplay(buf []byte, marker string) []byte {
 	lines := bytes.Split(buf, []byte("\n"))
-	var result [][]byte
+	var result []byte
 
-	for _, line := range lines {
-		// Skip lines containing the marker or compound command echo
+	skipMarker := []byte("<<<GOTTY_EXIT:")
+	for i, line := range lines {
+		// Strip trailing \r (from PTY CRLF mode)
+		line = bytes.TrimRight(line, "\r")
+
 		if bytes.Contains(line, []byte(marker)) {
 			continue
 		}
-		if bytes.Contains(line, []byte("<<<GOTTY_EXIT:")) {
+		if bytes.Contains(line, skipMarker) {
 			continue
 		}
-		result = append(result, line)
+
+		if i > 0 {
+			result = append(result, '\n')
+		}
+		result = append(result, line...)
 	}
 
-	return bytes.Join(result, []byte("\n"))
+	return result
 }
 
 // ExecError represents an API execution error.
