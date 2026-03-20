@@ -249,9 +249,12 @@ export class WebTTY {
                         break;
                     case msgAPINotification:
                         const notification = JSON.parse(payload);
+                        console.log("[GoTTY] API notification received:", notification);
                         if (notification.type === 'api_exec_start' && this.term.showAPIIndicator) {
+                            console.log("[GoTTY] Showing API indicator for:", notification.exec_id);
                             this.term.showAPIIndicator(notification.exec_id);
                         } else if (notification.type === 'api_exec_end' && this.term.hideAPIIndicator) {
+                            console.log("[GoTTY] Hiding API indicator for:", notification.exec_id);
                             this.term.hideAPIIndicator(notification.exec_id);
                         }
                         break;

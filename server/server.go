@@ -141,6 +141,8 @@ func (server *Server) Run(ctx context.Context, options ...RunOption) error {
 				"type":    status,
 				"exec_id": execID,
 			})
+			clientCount := server.sessionManager.GetClientCount()
+			log.Printf("[API Notify] Sending %s to %d clients (exec_id=%s)", status, clientCount, execID)
 			server.sessionManager.NotifyClients('9', payload)
 		}
 
