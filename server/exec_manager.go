@@ -78,8 +78,11 @@ type OutputEvent struct {
 }
 
 // Execute runs a command and waits for completion. Non-streaming.
-// Broadcast is paused for the entire execution so nothing is visible to Web clients.
-// The API indicator overlay tells Web users that an API command is running.
+//
+// The command echo is broadcast to Web clients in real-time (broadcast stays ON).
+// Once the echo line is fully received, broadcast is paused so the marker command
+// and execution output are invisible. After completion (or timeout), the command
+// output is replayed to Web clients and broadcast resumes.
 func (em *ExecManager) Execute(ctx context.Context, req ExecRequest, defaultTimeout int) (*ExecResult, error) {
 	execID := "exec_" + randomstring.Generate(8)
 	timeout := time.Duration(defaultTimeout) * time.Second
@@ -114,19 +117,31 @@ func (em *ExecManager) Execute(ctx context.Context, req ExecRequest, defaultTime
 
 	startTime := time.Now()
 
-	// 5. Pause broadcast for entire execution (+ 10s safety margin for cleanup)
-	em.broadcastCtrl.PauseFor(timeout + 10*time.Second)
-
-	// 6. Send compound command: user command ; marker
-	marker := fmt.Sprintf("<<<GOTTY_EXIT:%s:", execID)
-	markerPattern := regexp.MustCompile(fmt.Sprintf(`<<<GOTTY_EXIT:%s:(\d+)>>>`, regexp.QuoteMeta(execID)))
-	compound := fmt.Sprintf("%s; echo \"%s$?>>>\"\r", req.Command, marker)
-	if _, err := em.slave.Write([]byte(compound)); err != nil {
-		em.broadcastCtrl.Resume()
+	// 5. Send user command (broadcast still ON — web sees echo in real-time)
+	userCmd := req.Command + "\r"
+	if _, err := em.slave.Write([]byte(userCmd)); err != nil {
 		return nil, fmt.Errorf("failed to write command: %w", err)
 	}
 
-	// 7. Collect output until marker detected
+	// 6. Wait for the command echo line to complete, then pause broadcast.
+	//    The echo sentinel is the user command text itself in the PTY output.
+	if err := em.waitForEcho(outputCh, execCtx, req.Command); err != nil {
+		return nil, fmt.Errorf("failed waiting for command echo: %w", err)
+	}
+
+	// 7. Pause broadcast — from now on, web clients see nothing until replay.
+	em.broadcastCtrl.PauseFor(timeout + 10*time.Second)
+
+	// 8. Send marker command (hidden from web)
+	marker := fmt.Sprintf("<<<GOTTY_EXIT:%s:", execID)
+	markerPattern := regexp.MustCompile(fmt.Sprintf(`<<<GOTTY_EXIT:%s:(\d+)>>>`, regexp.QuoteMeta(execID)))
+	markerCmd := fmt.Sprintf("echo \"%s$?>>>\"\r", marker)
+	if _, err := em.slave.Write([]byte(markerCmd)); err != nil {
+		em.broadcastCtrl.Resume()
+		return nil, fmt.Errorf("failed to write marker command: %w", err)
+	}
+
+	// 9. Collect output until marker detected
 	var buf []byte
 	for {
 		select {
@@ -143,9 +158,9 @@ func (em *ExecManager) Execute(ctx context.Context, req ExecRequest, defaultTime
 				duration := time.Since(startTime).Milliseconds()
 				output := extractOutput(buf, marker)
 
-				// Replay to Web clients: command echo + raw output + post-marker data.
+				// Replay command output to Web clients.
 				if em.replayFn != nil {
-					replayData := buildReplayData(buf, marker, req.Command)
+					replayData := buildReplayOutput(buf, marker)
 					if len(replayData) > 0 {
 						em.replayFn(replayData)
 					}
@@ -166,7 +181,17 @@ func (em *ExecManager) Execute(ctx context.Context, req ExecRequest, defaultTime
 			log.Printf("[API Exec] Timeout: id=%s timeout=%v", execID, timeout)
 			// Send Ctrl+C to interrupt, then drain remaining output
 			em.slave.Write([]byte("\x03"))
-			em.drainOutput(outputCh, markerPattern, 3*time.Second)
+			drainBuf := em.drainOutput(outputCh, markerPattern, 3*time.Second)
+
+			// Replay whatever output was captured to Web clients.
+			if em.replayFn != nil {
+				allBuf := append(buf, drainBuf...)
+				replayData := buildReplayOutput(allBuf, marker)
+				if len(replayData) > 0 {
+					em.replayFn(replayData)
+				}
+			}
+
 			em.broadcastCtrl.Resume()
 			return &ExecResult{
 				ExecID:     execID,
@@ -181,7 +206,9 @@ func (em *ExecManager) Execute(ctx context.Context, req ExecRequest, defaultTime
 }
 
 // ExecuteStream runs a command and streams output via a channel.
-// Broadcast is paused for the entire execution so nothing is visible to Web clients.
+//
+// The command echo is broadcast in real-time; execution output is paused
+// and replayed after completion.
 func (em *ExecManager) ExecuteStream(ctx context.Context, req ExecRequest, defaultTimeout int, eventCh chan<- OutputEvent) error {
 	execID := "exec_" + randomstring.Generate(8)
 	timeout := time.Duration(defaultTimeout) * time.Second
@@ -219,19 +246,29 @@ func (em *ExecManager) ExecuteStream(ctx context.Context, req ExecRequest, defau
 
 	startTime := time.Now()
 
-	// 6. Pause broadcast for entire execution (+ 10s safety margin for cleanup)
-	em.broadcastCtrl.PauseFor(timeout + 10*time.Second)
-
-	// 7. Send compound command: user command ; marker
-	marker := fmt.Sprintf("<<<GOTTY_EXIT:%s:", execID)
-	markerPattern := regexp.MustCompile(fmt.Sprintf(`<<<GOTTY_EXIT:%s:(\d+)>>>`, regexp.QuoteMeta(execID)))
-	compound := fmt.Sprintf("%s; echo \"%s$?>>>\"\r", req.Command, marker)
-	if _, err := em.slave.Write([]byte(compound)); err != nil {
-		em.broadcastCtrl.Resume()
+	// 6. Send user command (broadcast still ON)
+	userCmd := req.Command + "\r"
+	if _, err := em.slave.Write([]byte(userCmd)); err != nil {
 		return fmt.Errorf("failed to write command: %w", err)
 	}
 
-	// 8. Collect and stream output
+	// 7. Wait for echo, then pause
+	if err := em.waitForEcho(outputCh, execCtx, req.Command); err != nil {
+		return fmt.Errorf("failed waiting for command echo: %w", err)
+	}
+
+	em.broadcastCtrl.PauseFor(timeout + 10*time.Second)
+
+	// 8. Send marker command (hidden)
+	marker := fmt.Sprintf("<<<GOTTY_EXIT:%s:", execID)
+	markerPattern := regexp.MustCompile(fmt.Sprintf(`<<<GOTTY_EXIT:%s:(\d+)>>>`, regexp.QuoteMeta(execID)))
+	markerCmd := fmt.Sprintf("echo \"%s$?>>>\"\r", marker)
+	if _, err := em.slave.Write([]byte(markerCmd)); err != nil {
+		em.broadcastCtrl.Resume()
+		return fmt.Errorf("failed to write marker command: %w", err)
+	}
+
+	// 9. Collect and stream output
 	var buf []byte
 	for {
 		select {
@@ -247,9 +284,9 @@ func (em *ExecManager) ExecuteStream(ctx context.Context, req ExecRequest, defau
 				exitCode, _ := strconv.Atoi(exitCodeStr)
 				duration := time.Since(startTime).Milliseconds()
 
-				// Replay to Web clients: command echo + raw output + post-marker data.
+				// Replay command output to Web clients.
 				if em.replayFn != nil {
-					replayData := buildReplayData(buf, marker, req.Command)
+					replayData := buildReplayOutput(buf, marker)
 					if len(replayData) > 0 {
 						em.replayFn(replayData)
 					}
@@ -277,7 +314,17 @@ func (em *ExecManager) ExecuteStream(ctx context.Context, req ExecRequest, defau
 		case <-execCtx.Done():
 			// Send Ctrl+C to interrupt, then drain remaining output
 			em.slave.Write([]byte("\x03"))
-			em.drainOutput(outputCh, markerPattern, 3*time.Second)
+			drainBuf := em.drainOutput(outputCh, markerPattern, 3*time.Second)
+
+			// Replay whatever output was captured to Web clients.
+			if em.replayFn != nil {
+				allBuf := append(buf, drainBuf...)
+				replayData := buildReplayOutput(allBuf, marker)
+				if len(replayData) > 0 {
+					em.replayFn(replayData)
+				}
+			}
+
 			em.broadcastCtrl.Resume()
 			eventCh <- OutputEvent{
 				Type: "completed",
@@ -310,23 +357,50 @@ func (em *ExecManager) disableOutputTap() {
 }
 
 // drainOutput reads and discards remaining PTY output until the marker is seen
-// or the deadline expires. This prevents marker text from leaking to web clients
-// after broadcast resumes.
-func (em *ExecManager) drainOutput(outputCh <-chan []byte, markerPattern *regexp.Regexp, deadline time.Duration) {
+// or the deadline expires. Returns collected bytes for potential replay.
+func (em *ExecManager) drainOutput(outputCh <-chan []byte, markerPattern *regexp.Regexp, deadline time.Duration) []byte {
 	timer := time.After(deadline)
 	var buf []byte
 	for {
 		select {
 		case data, ok := <-outputCh:
 			if !ok {
-				return
+				return buf
 			}
 			buf = append(buf, data...)
 			if markerPattern.Find(buf) != nil {
-				return
+				return buf
 			}
 		case <-timer:
-			return
+			return buf
+		}
+	}
+}
+
+// waitForEcho reads from the output channel until the command echo is fully
+// received (i.e. the command text followed by a newline). Data consumed here
+// is still broadcast to Web clients because the broadcast controller is not
+// yet paused.
+func (em *ExecManager) waitForEcho(outputCh <-chan []byte, ctx context.Context, command string) error {
+	needle := []byte(command)
+	var buf []byte
+	for {
+		select {
+		case data, ok := <-outputCh:
+			if !ok {
+				return fmt.Errorf("output channel closed while waiting for echo")
+			}
+			buf = append(buf, data...)
+			// Look for the command text followed by a newline (echo complete).
+			idx := bytes.Index(buf, needle)
+			if idx >= 0 {
+				nlIdx := bytes.IndexByte(buf[idx:], '\n')
+				if nlIdx >= 0 {
+					return nil
+				}
+			}
+		case <-ctx.Done():
+			return ctx.Err()
 		}
 	}
 }
@@ -383,43 +457,44 @@ func joinTrimmed(lines []string) string {
 	return result
 }
 
-// buildReplayData constructs raw bytes to replay to Web clients after an API exec.
-// It prepends a clean command echo (so the cursor advances past the prompt),
-// then includes the raw PTY output between the command echo line and the marker
-// result line, and finally any post-marker data (e.g. bracket-paste-on, prompt).
-func buildReplayData(buf []byte, marker string, command string) []byte {
+// buildReplayOutput extracts raw PTY bytes to replay to Web clients after an API exec.
+// Since the command echo was already broadcast in real-time, this only includes:
+//   - The command output between the marker echo line and the marker result line
+//   - Post-marker data (bracket-paste-on, new prompt, etc.)
+//
+// The buf here starts from when broadcast was paused (after the user command echo),
+// so it contains the marker echo command, execution output, and marker result.
+func buildReplayOutput(buf []byte, marker string) []byte {
 	var result []byte
+	gottyExit := []byte("<<<GOTTY_EXIT:")
 
-	// 1. Clean command echo so xterm cursor moves past the prompt line.
-	result = append(result, []byte(command)...)
-	result = append(result, '\r', '\n')
-
-	// 2. Find end of the command echo line (first \n after the marker appears).
-	markerBytes := []byte(marker)
-	echoIdx := bytes.Index(buf, markerBytes)
+	// Find the marker echo line (first occurrence of <<<GOTTY_EXIT:).
+	echoIdx := bytes.Index(buf, gottyExit)
 	if echoIdx < 0 {
-		return result
+		// No marker found at all; return everything (fallback).
+		return buf
 	}
+
+	// Find the end of the marker echo line.
 	nlAfterEcho := bytes.IndexByte(buf[echoIdx:], '\n')
 	if nlAfterEcho < 0 {
-		return result
+		return nil
 	}
-	startPos := echoIdx + nlAfterEcho + 1
+	outputStart := echoIdx + nlAfterEcho + 1
 
-	// 3. Find the marker result line (second occurrence of <<<GOTTY_EXIT: after echo).
-	gottyExit := []byte("<<<GOTTY_EXIT:")
-	markerResultIdx := bytes.Index(buf[startPos:], gottyExit)
+	// Find the marker result line (second occurrence of <<<GOTTY_EXIT:).
+	markerResultIdx := bytes.Index(buf[outputStart:], gottyExit)
 	if markerResultIdx < 0 {
-		// No marker result found; include everything after echo.
-		result = append(result, buf[startPos:]...)
+		// Marker result not found (e.g. timeout); include everything after echo.
+		result = append(result, buf[outputStart:]...)
 		return result
 	}
 
-	// 4. Raw output between echo line and marker result line.
-	result = append(result, buf[startPos:startPos+markerResultIdx]...)
+	// Command output between marker echo and marker result.
+	result = append(result, buf[outputStart:outputStart+markerResultIdx]...)
 
-	// 5. Post-marker data (bracket-paste-on, prompt, etc.).
-	markerResultAbs := startPos + markerResultIdx
+	// Post-marker data (bracket-paste-on, prompt, etc.).
+	markerResultAbs := outputStart + markerResultIdx
 	nlAfterMarker := bytes.IndexByte(buf[markerResultAbs:], '\n')
 	if nlAfterMarker >= 0 {
 		afterMarker := markerResultAbs + nlAfterMarker + 1
