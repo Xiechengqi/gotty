@@ -193,11 +193,12 @@ func (em *ExecManager) Execute(ctx context.Context, req ExecRequest, defaultTime
 			}
 
 			em.broadcastCtrl.Resume()
+			allBuf := append(buf, drainBuf...)
 			return &ExecResult{
 				ExecID:     execID,
 				Command:    req.Command,
 				ExitCode:   -1,
-				Output:     string(buf),
+				Output:     extractOutput(allBuf, marker),
 				DurationMs: time.Since(startTime).Milliseconds(),
 				TimedOut:   true,
 			}, nil
