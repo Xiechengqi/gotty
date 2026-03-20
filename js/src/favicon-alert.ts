@@ -100,13 +100,20 @@ export function installFaviconAlert(options: FaviconAlertOptions): () => void {
         const cachedPng = pngUrlCache[color];
         if (cachedPng) {
             faviconPngLink.href = cachedPng;
-            return;
+        } else {
+            const pngUrl = createPngDataUrl(COLORS[color]);
+            if (pngUrl) {
+                pngUrlCache[color] = pngUrl;
+                faviconPngLink.href = pngUrl;
+            }
         }
 
-        const pngUrl = createPngDataUrl(COLORS[color]);
-        if (pngUrl) {
-            pngUrlCache[color] = pngUrl;
-            faviconPngLink.href = pngUrl;
+        if (window.parent !== window) {
+            window.parent.postMessage({
+                type: 'gotty-favicon',
+                color: color,
+                svgUrl: faviconSvgLink.href,
+            }, '*');
         }
     };
 
