@@ -458,52 +458,12 @@ func joinTrimmed(lines []string) string {
 }
 
 // buildReplayOutput extracts raw PTY bytes to replay to Web clients after an API exec.
-// Since the command echo was already broadcast in real-time, this includes:
-//   - The command output between the marker echo line and the marker result line
-//   - Post-marker data (bracket-paste-on, prompt) with marker lines stripped
-//
-// Post-marker data must be replayed because it was consumed from the output tap
-// during the paused period and will not be re-broadcast after Resume().
+// Since the command echo was already broadcast in real-time, this strips ALL lines
+// containing <<<GOTTY_EXIT: (line-discipline echo, bash readline re-echo, and marker
+// result) and returns the remaining raw bytes verbatim. This handles the case where
+// bash produces multiple occurrences of the marker text in the output.
 func buildReplayOutput(buf []byte, marker string) []byte {
-	var result []byte
-	gottyExit := []byte("<<<GOTTY_EXIT:")
-
-	// Find the marker echo line (first occurrence of <<<GOTTY_EXIT:).
-	echoIdx := bytes.Index(buf, gottyExit)
-	if echoIdx < 0 {
-		return nil
-	}
-
-	// Find the end of the marker echo line.
-	nlAfterEcho := bytes.IndexByte(buf[echoIdx:], '\n')
-	if nlAfterEcho < 0 {
-		return nil
-	}
-	outputStart := echoIdx + nlAfterEcho + 1
-
-	// Find the marker result line (second occurrence of <<<GOTTY_EXIT:).
-	markerResultIdx := bytes.Index(buf[outputStart:], gottyExit)
-	if markerResultIdx < 0 {
-		// Marker result not found (e.g. timeout); include everything after echo
-		// but strip any lines containing the marker.
-		return stripMarkerLines(buf[outputStart:], gottyExit)
-	}
-
-	// Command output between marker echo and marker result.
-	result = append(result, buf[outputStart:outputStart+markerResultIdx]...)
-
-	// Post-marker data: everything after the marker result line, with any
-	// remaining marker lines stripped (e.g. bash re-echoing the marker command).
-	markerResultAbs := outputStart + markerResultIdx
-	nlAfterMarker := bytes.IndexByte(buf[markerResultAbs:], '\n')
-	if nlAfterMarker >= 0 {
-		afterMarker := markerResultAbs + nlAfterMarker + 1
-		if afterMarker < len(buf) {
-			result = append(result, stripMarkerLines(buf[afterMarker:], gottyExit)...)
-		}
-	}
-
-	return result
+	return stripMarkerLines(buf, []byte("<<<GOTTY_EXIT:"))
 }
 
 // stripMarkerLines removes any lines containing the needle from raw PTY data,
