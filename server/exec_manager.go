@@ -224,6 +224,12 @@ func (em *ExecManager) Execute(ctx context.Context, req ExecRequest, defaultTime
 			}
 
 			em.broadcastCtrl.Resume()
+
+			// Send Enter so the shell produces a fresh prompt visible to web clients.
+			// The Ctrl+C above interrupted the command and showed a prompt, but that
+			// happened while broadcast was paused so web clients didn't see it.
+			em.slave.Write([]byte("\r"))
+
 			return &ExecResult{
 				ExecID:     execID,
 				Command:    req.Command,
@@ -400,6 +406,10 @@ func (em *ExecManager) ExecuteStream(ctx context.Context, req ExecRequest, defau
 			}
 
 			em.broadcastCtrl.Resume()
+
+			// Send Enter so the shell produces a fresh prompt visible to web clients.
+			em.slave.Write([]byte("\r"))
+
 			sendEvent(OutputEvent{
 				Type: "completed",
 				ExecResult: ExecResult{
