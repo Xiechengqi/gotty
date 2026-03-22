@@ -481,11 +481,8 @@ API 认证与 `--credential` 参数联动：
 所有 API 请求必须携带令牌：
 
 ```sh
-# 方式一：Authorization Header
+# Authorization Header（唯一支持方式）
 curl -H "Authorization: Bearer user:pass" http://localhost:8080/api/v1/status
-
-# 方式二：Query 参数
-curl "http://localhost:8080/api/v1/status?token=user:pass"
 ```
 
 ### 互斥机制
@@ -562,7 +559,7 @@ curl -X POST -H "Authorization: Bearer user:pass" \
 
 #### POST /api/v1/exec
 
-执行命令并等待完成，返回完整结果。命令会在 Web 终端中可见，并带有 `[API]` 前缀标记。
+执行命令并等待完成，返回完整结果。命令会在 Web 终端中可见，并带有 `[API]` 前缀标记。`output` 字段返回终端过程文本（包含提示符、命令回显、命令输出），但会移除内部 marker 行。
 
 ```sh
 curl -X POST -H "Authorization: Bearer user:pass" \

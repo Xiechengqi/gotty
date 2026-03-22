@@ -196,7 +196,7 @@ if [ -n "$API_TOKEN" ]; then
     assert_http_status "wrong token → 401" "401" "$HTTP_STATUS"
 
     HTTP_STATUS=$(curl -SsL --max-time 5 -o /dev/null -w '%{http_code}' "${API}/status?token=${API_TOKEN}")
-    assert_http_status "query token → 200" "200" "$HTTP_STATUS"
+    assert_http_status "query token removed → 401" "401" "$HTTP_STATUS"
 fi
 
 # ============================================================

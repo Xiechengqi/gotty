@@ -1,10 +1,13 @@
 package server
 
 import (
+	"context"
 	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"regexp"
@@ -30,6 +33,7 @@ type APIStatusResponse struct {
 const (
 	maxCommandLen  = 8192 // bytes
 	maxExecTimeout = 600  // seconds (10 minutes)
+	maxAPIBodySize = 64 * 1024
 )
 
 // wrapAPIAuth wraps an HTTP handler with API token authentication.
@@ -40,7 +44,7 @@ func (server *Server) wrapAPIAuth(next http.Handler) http.Handler {
 			token = "user:pass"
 		}
 
-		// Check Authorization header
+		// Bearer authentication only.
 		auth := r.Header.Get("Authorization")
 		if strings.HasPrefix(auth, "Bearer ") {
 			provided := strings.TrimPrefix(auth, "Bearer ")
@@ -50,15 +54,7 @@ func (server *Server) wrapAPIAuth(next http.Handler) http.Handler {
 			}
 		}
 
-		// Check query parameter
-		if qToken := r.URL.Query().Get("token"); qToken != "" {
-			if subtle.ConstantTimeCompare([]byte(qToken), []byte(token)) == 1 {
-				next.ServeHTTP(w, r)
-				return
-			}
-		}
-
-		http.Error(w, `{"code":"UNAUTHORIZED","message":"invalid or missing API token"}`, http.StatusUnauthorized)
+		writeAPIError(w, http.StatusUnauthorized, "UNAUTHORIZED", "invalid or missing bearer token (query token is no longer supported)")
 	})
 }
 
@@ -75,8 +71,13 @@ func (server *Server) handleAPIInput(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req InputRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeAPIError(w, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
+	if err := decodeAPIRequestBody(w, r, &req); err != nil {
+		status := http.StatusBadRequest
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			status = http.StatusRequestEntityTooLarge
+		}
+		writeAPIError(w, status, "INVALID_REQUEST", err.Error())
 		return
 	}
 
@@ -120,8 +121,13 @@ func (server *Server) handleAPIExec(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req ExecRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeAPIError(w, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
+	if err := decodeAPIRequestBody(w, r, &req); err != nil {
+		status := http.StatusBadRequest
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			status = http.StatusRequestEntityTooLarge
+		}
+		writeAPIError(w, status, "INVALID_REQUEST", err.Error())
 		return
 	}
 
@@ -132,6 +138,11 @@ func (server *Server) handleAPIExec(w http.ResponseWriter, r *http.Request) {
 
 	if len(req.Command) > maxCommandLen {
 		writeAPIError(w, http.StatusBadRequest, "INVALID_REQUEST", fmt.Sprintf("command too long (%d bytes, max %d)", len(req.Command), maxCommandLen))
+		return
+	}
+
+	if req.Timeout < 0 {
+		writeAPIError(w, http.StatusBadRequest, "INVALID_REQUEST", "timeout must be >= 0")
 		return
 	}
 
@@ -180,8 +191,13 @@ func (server *Server) handleAPIExecStream(w http.ResponseWriter, r *http.Request
 	}
 
 	var req ExecRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeAPIError(w, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
+	if err := decodeAPIRequestBody(w, r, &req); err != nil {
+		status := http.StatusBadRequest
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			status = http.StatusRequestEntityTooLarge
+		}
+		writeAPIError(w, status, "INVALID_REQUEST", err.Error())
 		return
 	}
 
@@ -192,6 +208,11 @@ func (server *Server) handleAPIExecStream(w http.ResponseWriter, r *http.Request
 
 	if len(req.Command) > maxCommandLen {
 		writeAPIError(w, http.StatusBadRequest, "INVALID_REQUEST", fmt.Sprintf("command too long (%d bytes, max %d)", len(req.Command), maxCommandLen))
+		return
+	}
+
+	if req.Timeout < 0 {
+		writeAPIError(w, http.StatusBadRequest, "INVALID_REQUEST", "timeout must be >= 0")
 		return
 	}
 
@@ -207,15 +228,23 @@ func (server *Server) handleAPIExecStream(w http.ResponseWriter, r *http.Request
 	w.Header().Set("X-Accel-Buffering", "no")
 
 	eventCh := make(chan OutputEvent, 64)
+	execCtx, cancel := context.WithCancel(r.Context())
+	defer cancel()
 
 	// Run execution in goroutine
 	go func() {
 		defer close(eventCh)
-		if err := server.execManager.ExecuteStream(r.Context(), req, server.options.ExecTimeoutSec, eventCh); err != nil {
+		if err := server.execManager.ExecuteStream(execCtx, req, server.options.ExecTimeoutSec, eventCh); err != nil {
 			if execErr, ok := err.(*ExecError); ok {
-				eventCh <- OutputEvent{Type: "error", Content: execErr.Message}
+				select {
+				case eventCh <- OutputEvent{Type: "error", Content: execErr.Message}:
+				case <-execCtx.Done():
+				}
 			} else {
-				eventCh <- OutputEvent{Type: "error", Content: err.Error()}
+				select {
+				case eventCh <- OutputEvent{Type: "error", Content: err.Error()}:
+				case <-execCtx.Done():
+				}
 			}
 		}
 	}()
@@ -223,7 +252,10 @@ func (server *Server) handleAPIExecStream(w http.ResponseWriter, r *http.Request
 	// Stream events
 	for event := range eventCh {
 		data, _ := json.Marshal(event)
-		fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event.Type, data)
+		if _, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event.Type, data); err != nil {
+			cancel()
+			return
+		}
 		flusher.Flush()
 	}
 }
@@ -382,6 +414,23 @@ func writeAPIError(w http.ResponseWriter, status int, code, message string) {
 		"message": message,
 	})
 	log.Printf("[API Error] %d %s: %s", status, code, message)
+}
+
+func decodeAPIRequestBody(w http.ResponseWriter, r *http.Request, dst interface{}) error {
+	r.Body = http.MaxBytesReader(w, r.Body, maxAPIBodySize)
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+
+	if err := dec.Decode(dst); err != nil {
+		return err
+	}
+
+	var extra interface{}
+	if err := dec.Decode(&extra); err != io.EOF {
+		return fmt.Errorf("request body must contain exactly one JSON object")
+	}
+
+	return nil
 }
 
 // ansiPattern matches ANSI escape sequences (CSI, OSC, and single ESC sequences).

@@ -7,6 +7,7 @@ import (
 	"log"
 	"regexp"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -129,7 +130,8 @@ func (em *ExecManager) Execute(ctx context.Context, req ExecRequest, defaultTime
 
 	// 7. Wait for the command echo line to complete, then pause broadcast.
 	//    The echo sentinel is the user command text itself in the PTY output.
-	if err := em.waitForEcho(outputCh, execCtx, req.Command); err != nil {
+	echoBuf, err := em.waitForEcho(outputCh, execCtx, req.Command)
+	if err != nil {
 		return nil, fmt.Errorf("failed waiting for command echo: %w", err)
 	}
 
@@ -160,11 +162,12 @@ func (em *ExecManager) Execute(ctx context.Context, req ExecRequest, defaultTime
 				exitCodeStr := string(buf[loc[2]:loc[3]])
 				exitCode, _ := strconv.Atoi(exitCodeStr)
 				duration := time.Since(startTime).Milliseconds()
-				output := extractOutput(buf, marker)
+				fullBuf := concatBytes(echoBuf, buf)
+				output := extractOutput(fullBuf)
 
 				// Replay command output to Web clients.
 				if em.replayFn != nil {
-					replayData := buildReplayOutput(buf, marker)
+					replayData := buildReplayOutput(buf)
 					if len(replayData) > 0 {
 						em.replayFn(replayData)
 					}
@@ -188,16 +191,17 @@ func (em *ExecManager) Execute(ctx context.Context, req ExecRequest, defaultTime
 			drainBuf := em.drainOutput(outputCh, markerPattern, 3*time.Second)
 
 			// Check if marker appeared during drain (command finished at timeout edge)
-			allBuf := append(buf, drainBuf...)
+			allBuf := concatBytes(buf, drainBuf)
 			if loc := markerPattern.FindSubmatchIndex(allBuf); loc != nil {
 				// Command actually completed — extract proper output/exit code
 				exitCodeStr := string(allBuf[loc[2]:loc[3]])
 				exitCode, _ := strconv.Atoi(exitCodeStr)
 				duration := time.Since(startTime).Milliseconds()
-				output := extractOutput(allBuf, marker)
+				fullBuf := concatBytes(echoBuf, allBuf)
+				output := extractOutput(fullBuf)
 
 				if em.replayFn != nil {
-					replayData := buildReplayOutput(allBuf, marker)
+					replayData := buildReplayOutput(allBuf)
 					if len(replayData) > 0 {
 						em.replayFn(replayData)
 					}
@@ -217,7 +221,7 @@ func (em *ExecManager) Execute(ctx context.Context, req ExecRequest, defaultTime
 			// Truly timed out — only use pre-timeout buf for output
 			// (drainBuf contains Ctrl+C echo, bracket paste, prompt — not command output)
 			if em.replayFn != nil {
-				replayData := buildReplayOutput(buf, marker)
+				replayData := buildReplayOutput(buf)
 				if len(replayData) > 0 {
 					em.replayFn(replayData)
 				}
@@ -234,7 +238,7 @@ func (em *ExecManager) Execute(ctx context.Context, req ExecRequest, defaultTime
 				ExecID:     execID,
 				Command:    req.Command,
 				ExitCode:   -1,
-				Output:     extractOutput(buf, marker),
+				Output:     extractOutput(concatBytes(echoBuf, buf)),
 				DurationMs: time.Since(startTime).Milliseconds(),
 				TimedOut:   true,
 			}, nil
@@ -305,8 +309,15 @@ func (em *ExecManager) ExecuteStream(ctx context.Context, req ExecRequest, defau
 	}
 
 	// 8. Wait for echo, then pause
-	if err := em.waitForEcho(outputCh, execCtx, req.Command); err != nil {
+	echoBuf, err := em.waitForEcho(outputCh, execCtx, req.Command)
+	if err != nil {
 		return fmt.Errorf("failed waiting for command echo: %w", err)
+	}
+	if cleaned := string(stripMarkerLines(echoBuf, []byte("<<<GOTTY_EXIT:"))); cleaned != "" {
+		sendEvent(OutputEvent{
+			Type:    "output",
+			Content: cleaned,
+		})
 	}
 
 	em.broadcastCtrl.PauseFor(timeout + 10*time.Second)
@@ -338,7 +349,7 @@ func (em *ExecManager) ExecuteStream(ctx context.Context, req ExecRequest, defau
 
 				// Replay command output to Web clients.
 				if em.replayFn != nil {
-					replayData := buildReplayOutput(buf, marker)
+					replayData := buildReplayOutput(buf)
 					if len(replayData) > 0 {
 						em.replayFn(replayData)
 					}
@@ -372,14 +383,14 @@ func (em *ExecManager) ExecuteStream(ctx context.Context, req ExecRequest, defau
 			drainBuf := em.drainOutput(outputCh, markerPattern, 3*time.Second)
 
 			// Check if marker appeared during drain (command finished at timeout edge)
-			allBuf := append(buf, drainBuf...)
+			allBuf := concatBytes(buf, drainBuf)
 			if loc := markerPattern.FindSubmatchIndex(allBuf); loc != nil {
 				exitCodeStr := string(allBuf[loc[2]:loc[3]])
 				exitCode, _ := strconv.Atoi(exitCodeStr)
 				duration := time.Since(startTime).Milliseconds()
 
 				if em.replayFn != nil {
-					replayData := buildReplayOutput(allBuf, marker)
+					replayData := buildReplayOutput(allBuf)
 					if len(replayData) > 0 {
 						em.replayFn(replayData)
 					}
@@ -399,7 +410,7 @@ func (em *ExecManager) ExecuteStream(ctx context.Context, req ExecRequest, defau
 
 			// Truly timed out — only replay pre-timeout output
 			if em.replayFn != nil {
-				replayData := buildReplayOutput(buf, marker)
+				replayData := buildReplayOutput(buf)
 				if len(replayData) > 0 {
 					em.replayFn(replayData)
 				}
@@ -469,7 +480,7 @@ const echoTimeout = 5 * time.Second
 // received (i.e. the command text followed by a newline). Data consumed here
 // is still broadcast to Web clients because the broadcast controller is not
 // yet paused. Uses its own deadline (echoTimeout) in addition to the parent ctx.
-func (em *ExecManager) waitForEcho(outputCh <-chan []byte, ctx context.Context, command string) error {
+func (em *ExecManager) waitForEcho(outputCh <-chan []byte, ctx context.Context, command string) ([]byte, error) {
 	needle := []byte(command)
 	var buf []byte
 	echoDeadline := time.After(echoTimeout)
@@ -477,7 +488,7 @@ func (em *ExecManager) waitForEcho(outputCh <-chan []byte, ctx context.Context, 
 		select {
 		case data, ok := <-outputCh:
 			if !ok {
-				return fmt.Errorf("output channel closed while waiting for echo")
+				return nil, fmt.Errorf("output channel closed while waiting for echo")
 			}
 			buf = append(buf, data...)
 			// Look for the command text followed by a newline (echo complete).
@@ -485,67 +496,22 @@ func (em *ExecManager) waitForEcho(outputCh <-chan []byte, ctx context.Context, 
 			if idx >= 0 {
 				nlIdx := bytes.IndexByte(buf[idx:], '\n')
 				if nlIdx >= 0 {
-					return nil
+					return buf, nil
 				}
 			}
 		case <-echoDeadline:
-			return fmt.Errorf("echo timeout (%v) — command may contain special characters that altered PTY echo", echoTimeout)
+			return nil, fmt.Errorf("echo timeout (%v) — command may contain special characters that altered PTY echo", echoTimeout)
 		case <-ctx.Done():
-			return ctx.Err()
+			return nil, ctx.Err()
 		}
 	}
 }
 
-// extractOutput extracts command output, stripping the command echo and marker line.
-func extractOutput(buf []byte, marker string) string {
-	lines := bytes.Split(buf, []byte("\n"))
-	var output []string
-	started := false
-
-	for _, line := range lines {
-		lineStr := string(bytes.TrimRight(line, "\r"))
-
-		// Skip lines containing the marker (both echo and result)
-		if bytes.Contains(line, []byte(marker)) {
-			started = true
-			continue
-		}
-
-		// Skip lines containing the command echo (with full marker prefix)
-		if bytes.Contains(line, []byte("<<<GOTTY_EXIT:")) {
-			started = true
-			continue
-		}
-
-		// Skip lines before the command echo (prompt, etc.)
-		if !started {
-			continue
-		}
-
-		output = append(output, lineStr)
-	}
-
-	// Join and trim trailing empty lines
-	result := ""
-	if len(output) > 0 {
-		result = joinTrimmed(output)
-	}
-	return result
-}
-
-func joinTrimmed(lines []string) string {
-	// Remove trailing empty lines
-	for len(lines) > 0 && lines[len(lines)-1] == "" {
-		lines = lines[:len(lines)-1]
-	}
-	result := ""
-	for i, line := range lines {
-		if i > 0 {
-			result += "\n"
-		}
-		result += line
-	}
-	return result
+// extractOutput returns a terminal transcript segment:
+// prompt + command echo + command output, with internal marker lines removed.
+func extractOutput(buf []byte) string {
+	cleaned := stripMarkerLines(buf, []byte("<<<GOTTY_EXIT:"))
+	return strings.TrimRight(string(cleaned), "\r\n")
 }
 
 // buildReplayOutput extracts raw PTY bytes to replay to Web clients after an API exec.
@@ -553,7 +519,7 @@ func joinTrimmed(lines []string) string {
 // containing <<<GOTTY_EXIT: (line-discipline echo, bash readline re-echo, and marker
 // result) and returns the remaining raw bytes verbatim. This handles the case where
 // bash produces multiple occurrences of the marker text in the output.
-func buildReplayOutput(buf []byte, marker string) []byte {
+func buildReplayOutput(buf []byte) []byte {
 	return stripMarkerLines(buf, []byte("<<<GOTTY_EXIT:"))
 }
 
@@ -606,4 +572,16 @@ type ExecError struct {
 
 func (e *ExecError) Error() string {
 	return fmt.Sprintf("%s: %s", e.Code, e.Message)
+}
+
+func concatBytes(parts ...[]byte) []byte {
+	total := 0
+	for _, p := range parts {
+		total += len(p)
+	}
+	out := make([]byte, 0, total)
+	for _, p := range parts {
+		out = append(out, p...)
+	}
+	return out
 }
