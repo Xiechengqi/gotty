@@ -19,6 +19,10 @@ func (server *Server) readSlaveOutput(ctx context.Context) {
 
 			raw := buffer[:n]
 
+			if server.sessionManager.lineHistory != nil {
+				server.sessionManager.lineHistory.Append(raw)
+			}
+
 			// Feed raw output to exec manager (for marker detection)
 			if server.execManager != nil {
 				server.execManager.FeedOutput(raw)

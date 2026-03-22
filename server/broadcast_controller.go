@@ -1,6 +1,7 @@
 package server
 
 import (
+	"log"
 	"sync"
 	"time"
 )
@@ -82,14 +83,16 @@ func (bc *BroadcastController) HandleOutput(raw []byte) bool {
 		return true
 	}
 
-	// Send raw data to internal channel for probe listener
+	// Send raw data to internal channel for probe listener.
 	if bc.internal != nil {
 		cp := make([]byte, len(raw))
 		copy(cp, raw)
+		timer := time.NewTimer(250 * time.Millisecond)
+		defer timer.Stop()
 		select {
 		case bc.internal <- cp:
-		default:
-			// channel full, drop
+		case <-timer.C:
+			log.Printf("[Broadcast] WARNING: paused output channel blocked, data dropped after wait (%d bytes)", len(raw))
 		}
 	}
 	return false

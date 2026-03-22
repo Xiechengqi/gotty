@@ -2,16 +2,33 @@ package server
 
 import "testing"
 
-func TestExtractOutputIncludesTerminalTranscriptAndRemovesMarker(t *testing.T) {
-	input := []byte(
-		"user@host:~$ echo hello\r\n" +
-			"hello\r\n" +
-			"<<<GOTTY_EXIT:exec_abcd:0>>>\r\n" +
-			"user@host:~$ ",
-	)
+func TestExtractFramedOutputReturnsTranscriptBetweenMarkers(t *testing.T) {
+	start := []byte("<<<GOTTY_START:exec_abcd>>>")
+	exit := []byte("<<<GOTTY_EXIT:exec_abcd:")
+	input := []byte(`printf '\n<<<GOTTY_START:exec_abcd>>>\n'
+<<<GOTTY_START:exec_abcd>>>
+user@host:~$ echo hello
+hello
+printf '\n<<<GOTTY_EXIT:exec_abcd:%s>>>\n' "$?"
+<<<GOTTY_EXIT:exec_abcd:0>>>
+`)
 
-	got := extractOutput(input)
-	want := "user@host:~$ echo hello\r\nhello\r\nuser@host:~$ "
+	got := string(extractFramedOutput(input, start, exit, true))
+	want := "user@host:~$ echo hello\nhello\n"
+	if got != want {
+		t.Fatalf("unexpected output\nwant: %q\ngot:  %q", want, got)
+	}
+}
+
+func TestExtractFramedOutputAllowsPartialTranscript(t *testing.T) {
+	start := []byte("<<<GOTTY_START:exec_abcd>>>")
+	exit := []byte("<<<GOTTY_EXIT:exec_abcd:")
+	input := []byte(`<<<GOTTY_START:exec_abcd>>>
+user@host:~$ echo hello
+hello`)
+
+	got := string(extractFramedOutput(input, start, exit, true))
+	want := "user@host:~$ echo hello\nhello"
 	if got != want {
 		t.Fatalf("unexpected output\nwant: %q\ngot:  %q", want, got)
 	}

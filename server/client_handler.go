@@ -69,7 +69,7 @@ func (server *Server) handleClientInput(client *Client, message []byte) {
 			if err == nil && n > 0 {
 				if server.terminalStatus != nil {
 					// Atomically check state and update activity; write runs outside lock
-					server.terminalStatus.WriteIfNotExecuting(func() {
+					server.terminalStatus.WriteUserInput(func() {
 						server.sessionManager.slave.Write(decoded[:n])
 					})
 				} else {

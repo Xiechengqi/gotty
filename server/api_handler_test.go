@@ -100,6 +100,41 @@ func TestHandleAPIExecRejectsTooLargeBody(t *testing.T) {
 	}
 }
 
+func TestHandleAPIOutputLinesUsesLineHistory(t *testing.T) {
+	s := &Server{
+		sessionManager: &SessionManager{
+			lineHistory: NewLineBuffer(10),
+		},
+	}
+	s.sessionManager.lineHistory.Append([]byte("line1\nline"))
+	s.sessionManager.lineHistory.Append([]byte("2\nline3"))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/output/lines?n=2", nil)
+	rr := httptest.NewRecorder()
+
+	s.handleAPIOutputLines(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d (body=%s)", rr.Code, rr.Body.String())
+	}
+
+	var got struct {
+		Lines []string `json:"lines"`
+		Total int      `json:"total"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("expected json body, got error: %v", err)
+	}
+	if got.Total != 2 {
+		t.Fatalf("expected total=2, got %d", got.Total)
+	}
+	want := []string{"line2", "line3"}
+	for i := range want {
+		if got.Lines[i] != want[i] {
+			t.Fatalf("unexpected lines: %#v", got.Lines)
+		}
+	}
+}
+
 func TestWriteAPIErrorJSONShape(t *testing.T) {
 	rr := httptest.NewRecorder()
 	writeAPIError(rr, http.StatusUnauthorized, "UNAUTHORIZED", "invalid token")

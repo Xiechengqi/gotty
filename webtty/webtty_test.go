@@ -276,6 +276,10 @@ func (ms *mockSlave) WindowTitleVariables() map[string]interface{} {
 	return nil
 }
 
+func (ms *mockSlave) GetWorkingDir() (string, error) {
+	return "/tmp", nil
+}
+
 func (ms *mockSlave) ResizeTerminal(columns int, rows int) error {
 	ms.columns = columns
 	ms.rows = rows

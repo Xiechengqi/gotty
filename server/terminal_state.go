@@ -109,10 +109,10 @@ func (ts *TerminalStatus) ReleaseAPI(execID string) {
 	}
 }
 
-// WriteIfNotExecuting atomically checks that the terminal is not in API execution
+// WriteUserInput atomically checks that the terminal is not in API execution
 // state, updates user activity, and calls writeFn outside the lock.
 // Returns false if API is executing (writeFn is not called).
-func (ts *TerminalStatus) WriteIfNotExecuting(writeFn func()) bool {
+func (ts *TerminalStatus) WriteUserInput(writeFn func()) bool {
 	ts.mu.Lock()
 	if ts.state == StateAPIExecuting {
 		ts.mu.Unlock()
@@ -120,6 +120,20 @@ func (ts *TerminalStatus) WriteIfNotExecuting(writeFn func()) bool {
 	}
 	ts.state = StateUserActive
 	ts.lastUserInput = time.Now()
+	ts.mu.Unlock()
+
+	writeFn()
+	return true
+}
+
+// WriteAPIInput allows API-triggered input to be written as long as no API
+// execution is currently running, without marking the terminal as user-active.
+func (ts *TerminalStatus) WriteAPIInput(writeFn func()) bool {
+	ts.mu.Lock()
+	if ts.state == StateAPIExecuting {
+		ts.mu.Unlock()
+		return false
+	}
 	ts.mu.Unlock()
 
 	writeFn()

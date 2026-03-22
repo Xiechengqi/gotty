@@ -31,8 +31,8 @@ func NewProbeManager(slave Slave, bc *BroadcastController, timeout time.Duration
 // The entire probe is invisible to Web clients (broadcast is paused).
 func (pm *ProbeManager) Probe() error {
 	probeID := "probe_" + randomstring.Generate(8)
-	marker := fmt.Sprintf("GOTTY_PROBE_%s", probeID)
-	probeCmd := fmt.Sprintf(" echo %s\r", marker)
+	marker := fmt.Sprintf("<<<GOTTY_PROBE:%s>>>", probeID)
+	probeCmd := fmt.Sprintf(" printf '\n%s\n'\r", marker)
 
 	// 1. Pause broadcast — Web clients see nothing
 	pm.broadcastCtrl.Pause()

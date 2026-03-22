@@ -50,14 +50,15 @@ type terminalState struct {
 }
 
 type SessionManager struct {
-	slave      Slave
-	clients    map[*Client]bool
-	broadcast  chan []byte
-	register   chan *Client
-	unregister chan *Client
-	history    *HistoryBuffer
-	mu         sync.RWMutex
-	ctx        context.Context
+	slave       Slave
+	clients     map[*Client]bool
+	broadcast   chan []byte
+	register    chan *Client
+	unregister  chan *Client
+	history     *HistoryBuffer
+	lineHistory *LineBuffer
+	mu          sync.RWMutex
+	ctx         context.Context
 
 	resizePolicy     string
 	leaderSelect     string
@@ -111,6 +112,7 @@ func NewSessionManager(ctx context.Context, slave Slave, options *Options) *Sess
 		register:       make(chan *Client),
 		unregister:     make(chan *Client),
 		history:        NewHistoryBuffer(10 * 1024 * 1024), // 10MB
+		lineHistory:    NewLineBuffer(5000),
 		ctx:            ctx,
 		resizePolicy:   options.ResizePolicy,
 		leaderSelect:   options.LeaderSelect,

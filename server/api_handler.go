@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"crypto/subtle"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -89,7 +88,7 @@ func (server *Server) handleAPIInput(w http.ResponseWriter, r *http.Request) {
 
 	// Atomically check terminal state and write — reject if API is executing
 	var writeErr error
-	ok := server.terminalStatus.WriteIfNotExecuting(func() {
+	ok := server.terminalStatus.WriteAPIInput(func() {
 		_, writeErr = server.sessionManager.slave.Write(data)
 	})
 	if !ok {
@@ -281,35 +280,7 @@ func (server *Server) handleAPIOutputLines(w http.ResponseWriter, r *http.Reques
 		}
 	}
 
-	// Get history messages and decode
-	messages := server.sessionManager.history.GetLastN(n)
-	var allText []byte
-	for _, msg := range messages {
-		if len(msg) > 1 && msg[0] == '1' {
-			decoded := make([]byte, base64.StdEncoding.DecodedLen(len(msg)-1))
-			dn, err := base64.StdEncoding.Decode(decoded, msg[1:])
-			if err == nil {
-				allText = append(allText, decoded[:dn]...)
-			}
-		}
-	}
-
-	// Split into lines and take last N
-	allLines := strings.Split(string(allText), "\n")
-	// Clean up \r
-	for i := range allLines {
-		allLines[i] = strings.TrimRight(allLines[i], "\r")
-	}
-	// Remove trailing empty lines
-	for len(allLines) > 0 && allLines[len(allLines)-1] == "" {
-		allLines = allLines[:len(allLines)-1]
-	}
-
-	start := 0
-	if len(allLines) > n {
-		start = len(allLines) - n
-	}
-	lines := allLines[start:]
+	lines := server.sessionManager.lineHistory.GetLastN(n)
 
 	// Optionally strip ANSI escape sequences
 	if r.URL.Query().Get("strip_ansi") == "true" {
