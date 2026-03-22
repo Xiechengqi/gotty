@@ -120,4 +120,12 @@ if (elem !== null) {
         closer();
         term.close();
     });
+
+    // Listen for focus request from parent window (e.g., Miao tab switching)
+    window.addEventListener("message", (event) => {
+        const data = event.data;
+        if (data && data.type === 'gotty-focus') {
+            term.focus();
+        }
+    });
 };
