@@ -4,12 +4,14 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/base64"
 	"html/template"
 	"io/fs"
 	"log"
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	noesctmpl "text/template"
@@ -69,6 +71,17 @@ func New(factory Factory, options *Options) (*Server, error) {
 	}
 
 	titleTemplate, err := noesctmpl.New("title").Parse(options.TitleFormat)
+
+	// Resolve favicon: local file paths are read and converted to inline
+	// base64 data URIs; URLs and data URIs are passed through as-is.
+	if options.Favicon != "" {
+		resolved, err := resolveFavicon(options.Favicon)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to resolve favicon `%s`", options.Favicon)
+		}
+		options.Favicon = resolved
+		log.Printf("Custom favicon configured: %s", truncateForLog(options.Favicon))
+	}
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to parse window title format `%s`", options.TitleFormat)
 	}
@@ -272,4 +285,57 @@ func (server *Server) tlsConfig() (*tls.Config, error) {
 		ClientAuth: tls.RequireAndVerifyClientCert,
 	}
 	return tlsConfig, nil
+}
+
+// resolveFavicon converts a favicon reference into a ready-to-use href value.
+//   - Local file paths are read from disk and converted to inline base64 data URIs.
+//   - HTTP(S) URLs, data URIs, and protocol-relative URLs are passed through as-is.
+//   - File expansion (~ → $HOME) is applied for local paths.
+func resolveFavicon(raw string) (string, error) {
+	// Pass through URLs, data URIs, and protocol-relative URLs
+	if strings.HasPrefix(raw, "http://") ||
+		strings.HasPrefix(raw, "https://") ||
+		strings.HasPrefix(raw, "data:") ||
+		strings.HasPrefix(raw, "//") {
+		return raw, nil
+	}
+
+	// Treat as local file path
+	path := homedir.Expand(raw)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	mime := mimeByExt(filepath.Ext(path))
+	encoded := base64.StdEncoding.EncodeToString(data)
+	return "data:" + mime + ";base64," + encoded, nil
+}
+
+// mimeByExt returns the MIME type for common favicon file extensions.
+func mimeByExt(ext string) string {
+	switch strings.ToLower(ext) {
+	case ".png":
+		return "image/png"
+	case ".ico":
+		return "image/x-icon"
+	case ".svg":
+		return "image/svg+xml"
+	case ".gif":
+		return "image/gif"
+	case ".jpg", ".jpeg":
+		return "image/jpeg"
+	case ".webp":
+		return "image/webp"
+	default:
+		return "image/png"
+	}
+}
+
+// truncateForLog shortens a data URI string for log output so we don't
+// print multi-kilobyte base64 blobs in the startup log.
+func truncateForLog(s string) string {
+	if strings.HasPrefix(s, "data:") && len(s) > 120 {
+		return s[:100] + "..." + s[len(s)-20:]
+	}
+	return s
 }
