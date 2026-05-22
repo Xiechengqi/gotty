@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/pkg/errors"
@@ -86,6 +87,9 @@ func (server *Server) generateHandleWS(ctx context.Context, cancel context.Cance
 			closeReason = server.factory.Name()
 		case webtty.ErrMasterClosed:
 			closeReason = "client"
+			if server.clientGoneCh != nil {
+				server.clientGoneCh <- r.RemoteAddr
+			}
 		default:
 			closeReason = fmt.Sprintf("an error: %s", err)
 		}
@@ -108,6 +112,32 @@ func (server *Server) processWSConn(ctx context.Context, conn *websocket.Conn, h
 	}
 	if init.AuthToken != server.options.Credential {
 		return errors.New("failed to authenticate websocket connection")
+	}
+
+	// Set up server-side WebSocket ping/pong to keep the connection alive
+	// when the browser tab is in the background (where JS timers are throttled).
+	pingInterval := server.options.PingInterval
+	if pingInterval > 0 {
+		conn.SetPongHandler(func(string) error {
+			return conn.SetReadDeadline(time.Now().Add(time.Duration(pingInterval) * 2 * time.Second))
+		})
+		pingCtx, pingCancel := context.WithCancel(ctx)
+		defer pingCancel()
+		go func() {
+			ticker := time.NewTicker(time.Duration(pingInterval) * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ticker.C:
+					conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+					if err := conn.WriteControl(websocket.PingMessage, []byte{}, time.Now().Add(10*time.Second)); err != nil {
+						return
+					}
+				case <-pingCtx.Done():
+					return
+				}
+			}
+		}()
 	}
 
 	queryPath := "?"
@@ -169,6 +199,9 @@ func (server *Server) processWSConn(ctx context.Context, conn *websocket.Conn, h
 	}
 
 	err = tty.Run(ctx)
+	if err == webtty.ErrMasterClosed {
+		_ = slave.Close()
+	}
 
 	return err
 }
