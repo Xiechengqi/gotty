@@ -26,6 +26,7 @@ export class GoTTYXterm {
     zmodemAddon: ZModemAddon;
     toServer!: (data: string | Uint8Array) => void;
     encoder!: TextEncoder
+    altIsMeta: boolean = false;
 
     constructor(elem: HTMLElement, preferences: Record<string, unknown> = {}) {
         this.elem = elem;
@@ -71,6 +72,9 @@ export class GoTTYXterm {
 
         this.term.focus();
         this.resizeListener();
+
+        // Pre-register the alt_is_meta handler; it's a no-op unless altIsMeta is true.
+        this.setupAltIsMeta();
 
         window.addEventListener("resize", () => { this.resizeListener(); });
     };
@@ -155,8 +159,59 @@ export class GoTTYXterm {
                 case "theme":
                     this.term.options.theme = value[key] as object;
                     break;
+                case "alt-is-meta":
+                    this.altIsMeta = value[key] as boolean;
+                    break;
             }
         }
+    };
+
+    setupAltIsMeta() {
+        this.term.attachCustomKeyEventHandler((event: KeyboardEvent) => {
+            if (!this.altIsMeta) return true;
+
+            // Only handle Alt+key without Ctrl/Meta
+            if (!event.altKey || event.ctrlKey || event.metaKey) return true;
+
+            // Skip special keys that should be handled by the browser
+            // (Tab, arrows, function keys, etc.)
+            if (event.code.startsWith('Alt') || event.code === 'Tab') return true;
+
+            // Determine the character to send with the Escape prefix
+            let char: string | null = null;
+
+            if (event.code.startsWith('Key') && event.code.length === 4) {
+                // Letter keys: use event.code to get the base character,
+                // which works correctly on macOS where Option composes characters
+                const letter = event.code[3];
+                char = event.shiftKey ? letter : letter.toLowerCase();
+            } else if (event.code.startsWith('Digit') && event.code.length === 6) {
+                // Digit keys: handle unshifted digits and shifted symbols
+                const digit = event.code[5];
+                if (!event.shiftKey) {
+                    char = digit;
+                } else {
+                    // Shifted digit keys produce symbols; use event.key
+                    if (event.key.length === 1) {
+                        char = event.key;
+                    }
+                }
+            } else if (event.key === ' ') {
+                // Alt+Space -> M-SPC
+                char = ' ';
+            } else if (event.key.length === 1 && event.key !== ' ') {
+                // Other single-character keys (., /, ;, ', [, ], etc.)
+                char = event.key;
+            }
+
+            if (char !== null) {
+                event.preventDefault();
+                this.toServer(this.encoder.encode('\x1b' + char));
+                return false;
+            }
+
+            return true;
+        });
     };
 
     sendInput(data: Uint8Array) {

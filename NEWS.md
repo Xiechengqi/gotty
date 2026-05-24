@@ -1,5 +1,8 @@
 ##  v1.7.0 (unreleased)
 
+* Add `preferences { alt_is_meta = true }` — restores hterm's Alt-as-Meta key
+  behavior for Emacs users. Uses `attachCustomKeyEventHandler` to intercept
+  Alt+key combos and send `\x1b` prefix (Meta). Fixes #44.
 * Add runtime display picker — floating 🎨 button for live theme switching, font size adjustment, and font family selection, all persisted to localStorage.
 * Add 6 built-in color themes: Catppuccin Mocha (default), Nord, Dracula, Solarized Dark, Monokai, Light — configurable via `preferences { theme = "name" }`.
 * Add font size picker with preset buttons (10–24 px) and config support via `preferences { font_size = N }`.

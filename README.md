@@ -184,6 +184,25 @@ preferences {
 }
 ```
 
+#### Alt as Meta Key
+
+For terminal applications that use the Meta modifier (e.g. Emacs), you can
+have the Alt/Option key send an Escape prefix (`M-x` → `\x1b` + `x`):
+
+```hcl
+preferences {
+    alt_is_meta = true
+}
+```
+
+This uses xterm.js's `attachCustomKeyEventHandler` to intercept Alt+key
+combinations before they reach the browser's default handling, and sends
+them as a Meta (Escape) sequence to the terminal. Works on macOS, Linux,
+and Windows.
+
+Letter keys, digits, space, and common punctuation are supported.
+Browser-handled shortcuts like Alt+Tab and Alt+F4 are left alone.
+
 #### Runtime Picker (🎨 button)
 
 When you open a GoTTY session, a small 🎨 button appears in the

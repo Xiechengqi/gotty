@@ -78,6 +78,7 @@ type Preferences struct {
 	CursorBlink           bool     `hcl:"cursor_blink"`
 	ScrollbackLines       int      `hcl:"scrollback_lines"`
 	EnableWebGL           bool     `hcl:"enable_webgl"`
+	AltIsMeta             bool     `hcl:"alt_is_meta"`
 	ColorPaletteOverrides []string `hcl:"color_palette_overrides"`
 }
 

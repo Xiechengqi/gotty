@@ -363,6 +363,11 @@ func (server *Server) buildPreferences() map[string]interface{} {
 		out["EnableWebGL"] = true
 	}
 
+	// Alt as Meta key
+	if prefs.AltIsMeta {
+		out["alt-is-meta"] = true
+	}
+
 	// Color palette overrides (overrides built-in theme palette entries)
 	if len(prefs.ColorPaletteOverrides) > 0 {
 		palette := prefs.ColorPaletteOverrides
