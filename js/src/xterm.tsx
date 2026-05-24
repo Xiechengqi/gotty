@@ -25,11 +25,12 @@ export class GoTTYXterm {
     fitAddOn: FitAddon;
     zmodemAddon: ZModemAddon;
     toServer!: (data: string | Uint8Array) => void;
-    encoder!: TextEncoder
+    encoder: TextEncoder;
     altIsMeta: boolean = false;
 
     constructor(elem: HTMLElement, preferences: Record<string, unknown> = {}) {
         this.elem = elem;
+        this.encoder = new TextEncoder();
         this.term = new Terminal({
             allowProposedApi: true,
             customGlyphs: true,
