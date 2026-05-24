@@ -5,7 +5,7 @@ import (
 )
 
 type Options struct {
-	Address             string `hcl:"address" flagName:"address" flagSName:"a" flagDescribe:"IP address to listen" default:"0.0.0.0"`
+	Address             string `hcl:"address" flagName:"address" flagSName:"a" flagDescribe:"IP address(es) to listen (comma-separated for multiple)" default:"0.0.0.0"`
 	Port                string `hcl:"port" flagName:"port" flagSName:"p" flagDescribe:"Port number to liten" default:"8080"`
 	Path                string `hcl:"path" flagName:"path" flagSName:"m" flagDescribe:"Base path" default:"/"`
 	PermitWrite         bool   `hcl:"permit_write" flagName:"permit-write" flagSName:"w" flagDescribe:"Permit clients to write to the TTY (BE CAREFUL)" default:"false"`

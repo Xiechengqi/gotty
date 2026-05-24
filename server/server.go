@@ -152,40 +152,63 @@ func (server *Server) Run(ctx context.Context, options ...RunOption) error {
 	if server.options.Port == "0" {
 		log.Printf("Port number configured to `0`, choosing a random port")
 	}
-	hostPort := net.JoinHostPort(server.options.Address, server.options.Port)
-	listener, err := net.Listen("tcp", hostPort)
-	if err != nil {
-		return errors.Wrapf(err, "failed to listen at `%s`", hostPort)
+
+	// Parse comma-separated addresses for multi-interface binding
+	addrs := strings.Split(server.options.Address, ",")
+	for i := range addrs {
+		addrs[i] = strings.TrimSpace(addrs[i])
 	}
 
 	scheme := "http"
 	if server.options.EnableTLS {
 		scheme = "https"
 	}
-	host, port, _ := net.SplitHostPort(listener.Addr().String())
-	log.Printf("HTTP server is listening at: %s", scheme+"://"+net.JoinHostPort(host, port)+path)
+
+	var crtFile, keyFile string
+	if server.options.EnableTLS {
+		crtFile = homedir.Expand(server.options.TLSCrtFile)
+		keyFile = homedir.Expand(server.options.TLSKeyFile)
+		log.Printf("TLS crt file: %s", crtFile)
+		log.Printf("TLS key file: %s", keyFile)
+	}
+
+	listeners := make([]net.Listener, 0, len(addrs))
+	for _, addr := range addrs {
+		hostPort := net.JoinHostPort(addr, server.options.Port)
+		listener, err := net.Listen("tcp", hostPort)
+		if err != nil {
+			for _, l := range listeners {
+				l.Close()
+			}
+			return errors.Wrapf(err, "failed to listen at `%s`", hostPort)
+		}
+		listeners = append(listeners, listener)
+
+		host, port, _ := net.SplitHostPort(listener.Addr().String())
+		log.Printf("HTTP server is listening at: %s", scheme+"://"+net.JoinHostPort(host, port)+path)
+	}
 	if server.options.Address == "0.0.0.0" {
+		_, port, _ := net.SplitHostPort(listeners[0].Addr().String())
 		for _, address := range listAddresses() {
 			log.Printf("Alternative URL: %s", scheme+"://"+net.JoinHostPort(address, port)+path)
 		}
 	}
 
-	srvErr := make(chan error, 1)
-	go func() {
-		if server.options.EnableTLS {
-			crtFile := homedir.Expand(server.options.TLSCrtFile)
-			keyFile := homedir.Expand(server.options.TLSKeyFile)
-			log.Printf("TLS crt file: %s", crtFile)
-			log.Printf("TLS key file: %s", keyFile)
-
-			err = srv.ServeTLS(listener, crtFile, keyFile)
-		} else {
-			err = srv.Serve(listener)
-		}
-		if err != nil {
-			srvErr <- err
-		}
-	}()
+	srvErr := make(chan error, len(listeners))
+	for _, listener := range listeners {
+		l := listener // capture
+		go func() {
+			var serveErr error
+			if server.options.EnableTLS {
+				serveErr = srv.ServeTLS(l, crtFile, keyFile)
+			} else {
+				serveErr = srv.Serve(l)
+			}
+			if serveErr != nil {
+				srvErr <- serveErr
+			}
+		}()
+	}
 
 	go func() {
 		select {
