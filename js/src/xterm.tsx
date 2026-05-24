@@ -27,7 +27,7 @@ export class GoTTYXterm {
     toServer!: (data: string | Uint8Array) => void;
     encoder!: TextEncoder
 
-    constructor(elem: HTMLElement) {
+    constructor(elem: HTMLElement, preferences: Record<string, unknown> = {}) {
         this.elem = elem;
         this.term = new Terminal({
             allowProposedApi: true,
@@ -36,6 +36,8 @@ export class GoTTYXterm {
         const unicode11Addon = new Unicode11Addon();
         this.term.loadAddon(unicode11Addon);
         this.term.unicode.activeVersion = '11';
+
+        this.setPreferences(preferences);
 
         this.fitAddOn = new FitAddon();
         this.zmodemAddon = new ZModemAddon({
@@ -109,7 +111,11 @@ export class GoTTYXterm {
         document.title = title;
     };
 
-    setPreferences(value: Record<string, unknown>) {
+    setPreferences(value?: Record<string, unknown> | null) {
+        if (!value) {
+            return;
+        }
+
         Object.keys(value).forEach((key) => {
             switch (key) {
                 case "EnableWebGL":
