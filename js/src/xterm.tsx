@@ -305,6 +305,7 @@ export class GoTTYXterm {
     connectionCountElem: HTMLElement;
     clearHistoryBtn: HTMLElement;
     uploadBtn: HTMLElement;
+    restartBtn: HTMLElement;
     fileInput: HTMLInputElement;
     terminalStateElem: HTMLElement | null = null;
     private apiIndicatorElem: HTMLElement | null = null;
@@ -397,6 +398,17 @@ export class GoTTYXterm {
             this.fileInput.click();
         });
         elem.appendChild(this.uploadBtn);
+
+        // 创建重启按钮
+        this.restartBtn = elem.ownerDocument.createElement("button");
+        this.restartBtn.className = "restart-btn";
+        this.restartBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M13 6a5 5 0 10-1.46 3.54M13 6V2.5M13 6H9.5" stroke="rgba(255,255,255,0.7)" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+        this.restartBtn.title = "重启";
+        this.restartBtn.style.cssText = "position:fixed;top:106px;right:10px;background:rgba(0,0,0,0.7);color:#fff;padding:3px 8px;border-radius:4px;font-size:12px;z-index:1000;cursor:pointer;border:none;";
+        this.restartBtn.addEventListener('click', () => {
+            window.location.reload();
+        });
+        elem.appendChild(this.restartBtn);
 
         // 创建隐藏的文件输入元素
         this.fileInput = elem.ownerDocument.createElement("input");
