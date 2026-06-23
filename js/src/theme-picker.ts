@@ -79,36 +79,36 @@ export function initThemePicker(term?: Terminal): void {
     style.textContent = `
 #gotty-theme-btn {
     position: fixed;
-    bottom: 12px;
-    right: 12px;
-    width: 36px;
-    height: 36px;
-    border-radius: 50%;
+    top: 42px;
+    right: 10px;
+    width: 28px;
+    height: 28px;
+    border-radius: 4px;
     border: none;
-    background: rgba(0,0,0,0.55);
+    background: rgba(0,0,0,0.7);
     color: #fff;
-    font-size: 18px;
+    padding: 0;
     cursor: pointer;
-    z-index: 9999;
+    z-index: 1000;
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: background 0.2s, transform 0.2s;
-    backdrop-filter: blur(4px);
     line-height: 1;
 }
 #gotty-theme-btn:hover {
     background: rgba(0,0,0,0.75);
-    transform: scale(1.1);
+}
+#gotty-theme-btn svg {
+    display: block;
 }
 #gotty-theme-picker {
     position: fixed;
-    bottom: 54px;
-    right: 12px;
+    top: 42px;
+    right: 46px;
     z-index: 9999;
     display: none;
     min-width: 190px;
-    max-height: 70vh;
+    max-height: calc(100vh - 54px);
     overflow-y: auto;
 }
 #gotty-theme-picker.open {
@@ -254,8 +254,10 @@ export function initThemePicker(term?: Terminal): void {
     // --- Button ---
     const btn = document.createElement("button");
     btn.id = "gotty-theme-btn";
-    btn.textContent = "🎨";
-    btn.title = "Display settings";
+    btn.type = "button";
+    btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M4.5 3.5h7M8 3.5v9M5.5 12.5h5M3 6h10" stroke="rgba(255,255,255,0.7)" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+    btn.title = "显示设置";
+    btn.setAttribute("aria-label", "Display settings");
     document.body.appendChild(btn);
 
     // --- Dropdown ---
