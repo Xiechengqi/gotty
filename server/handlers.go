@@ -17,7 +17,7 @@ import (
 	"github.com/sorenisanerd/gotty/webtty"
 )
 
-func (server *Server) generateHandleWS(ctx context.Context, cancel context.CancelFunc, counter *counter) http.HandlerFunc {
+func (server *Server) generateHandleWS(ctx context.Context, gracefullCtx context.Context, cancel context.CancelFunc, counter *counter) http.HandlerFunc {
 	once := new(int64)
 
 	go func() {
@@ -73,14 +73,17 @@ func (server *Server) generateHandleWS(ctx context.Context, cancel context.Cance
 		}
 		defer conn.Close()
 
+		connCtx, connCancel := withWebSocketShutdown(ctx, gracefullCtx, conn)
+		defer connCancel()
+
 		if server.options.PassHeaders {
-			err = server.processWSConn(ctx, conn, r.Header)
+			err = server.processWSConn(connCtx, conn, r.Header)
 		} else {
-			err = server.processWSConn(ctx, conn, nil)
+			err = server.processWSConn(connCtx, conn, nil)
 		}
 
 		switch err {
-		case ctx.Err():
+		case connCtx.Err():
 			closeReason = "cancelation"
 		case webtty.ErrSlaveClosed:
 			closeReason = server.factory.Name()
@@ -95,6 +98,9 @@ func (server *Server) generateHandleWS(ctx context.Context, cancel context.Cance
 func (server *Server) processWSConn(ctx context.Context, conn *websocket.Conn, headers map[string][]string) error {
 	typ, initLine, err := conn.ReadMessage()
 	if err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		return errors.Wrapf(err, "failed to authenticate websocket connection")
 	}
 	if typ != websocket.TextMessage {
@@ -116,9 +122,18 @@ func (server *Server) processWSConn(ctx context.Context, conn *websocket.Conn, h
 		ready: make(chan struct{}),
 	}
 
-	server.sessionManager.register <- client
+	select {
+	case server.sessionManager.register <- client:
+	case <-server.sessionManager.ctx.Done():
+		return server.sessionManager.ctx.Err()
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 	defer func() {
-		server.sessionManager.unregister <- client
+		select {
+		case server.sessionManager.unregister <- client:
+		case <-server.sessionManager.ctx.Done():
+		}
 	}()
 	select {
 	case <-client.ready:
@@ -130,6 +145,9 @@ func (server *Server) processWSConn(ctx context.Context, conn *websocket.Conn, h
 	history := server.sessionManager.history.GetAll()
 	for _, msg := range history {
 		if err := conn.WriteMessage(websocket.TextMessage, msg); err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
 			return err
 		}
 	}
@@ -167,6 +185,9 @@ func (server *Server) processWSConn(ctx context.Context, conn *websocket.Conn, h
 		default:
 			_, message, err := conn.ReadMessage()
 			if err != nil {
+				if ctx.Err() != nil {
+					return ctx.Err()
+				}
 				return err
 			}
 			if len(message) > 0 {

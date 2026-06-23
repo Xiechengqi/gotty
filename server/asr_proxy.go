@@ -12,7 +12,7 @@ import (
 	"github.com/pkg/errors"
 )
 
-func (server *Server) generateHandleASRWS(ctx context.Context) http.HandlerFunc {
+func (server *Server) generateHandleASRWS(ctx context.Context, gracefullCtx context.Context) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if !server.options.EnableASR {
 			http.Error(w, "ASR is disabled", http.StatusNotFound)
@@ -35,7 +35,13 @@ func (server *Server) generateHandleASRWS(ctx context.Context) http.HandlerFunc 
 		}
 		defer clientConn.Close()
 
+		clientCtx, clientCancel := withWebSocketShutdown(ctx, gracefullCtx, clientConn)
+		defer clientCancel()
+
 		if err := server.authenticateASRWS(clientConn); err != nil {
+			if clientCtx.Err() != nil {
+				return
+			}
 			_ = clientConn.WriteControl(
 				websocket.CloseMessage,
 				websocket.FormatCloseMessage(websocket.ClosePolicyViolation, err.Error()),
@@ -44,8 +50,11 @@ func (server *Server) generateHandleASRWS(ctx context.Context) http.HandlerFunc 
 			return
 		}
 
-		backendConn, _, err := websocket.DefaultDialer.Dial(server.options.ASRBackend, nil)
+		backendConn, _, err := websocket.DefaultDialer.DialContext(clientCtx, server.options.ASRBackend, nil)
 		if err != nil {
+			if clientCtx.Err() != nil {
+				return
+			}
 			log.Printf("ASR backend dial failed: %v", err)
 			_ = clientConn.WriteControl(
 				websocket.CloseMessage,
@@ -55,8 +64,10 @@ func (server *Server) generateHandleASRWS(ctx context.Context) http.HandlerFunc 
 			return
 		}
 		defer backendConn.Close()
+		backendCtx, backendCancel := withWebSocketShutdown(ctx, gracefullCtx, backendConn)
+		defer backendCancel()
 
-		ctx, cancel := context.WithCancel(ctx)
+		proxyCtx, cancel := context.WithCancel(clientCtx)
 		defer cancel()
 
 		var wg sync.WaitGroup
@@ -64,17 +75,21 @@ func (server *Server) generateHandleASRWS(ctx context.Context) http.HandlerFunc 
 
 		go func() {
 			defer wg.Done()
-			server.proxyWS(ctx, backendConn, clientConn)
+			server.proxyWS(proxyCtx, backendConn, clientConn)
 			cancel()
 		}()
 
 		go func() {
 			defer wg.Done()
-			server.proxyWS(ctx, clientConn, backendConn)
+			server.proxyWS(proxyCtx, clientConn, backendConn)
 			cancel()
 		}()
 
-		<-ctx.Done()
+		select {
+		case <-proxyCtx.Done():
+		case <-backendCtx.Done():
+			cancel()
+		}
 		_ = clientConn.SetReadDeadline(time.Now().Add(50 * time.Millisecond))
 		_ = backendConn.SetReadDeadline(time.Now().Add(50 * time.Millisecond))
 		wg.Wait()

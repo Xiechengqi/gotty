@@ -180,7 +180,7 @@ func (server *Server) Run(ctx context.Context, options ...RunOption) error {
 	if !strings.HasSuffix(path, "/") {
 		path = path + "/"
 	}
-	handlers := server.setupHandlers(cctx, cancel, path, counter)
+	handlers := server.setupHandlers(cctx, opts.gracefullCtx, cancel, path, counter)
 	srv, err := server.setupHTTPServer(handlers)
 	if err != nil {
 		return errors.Wrapf(err, "failed to setup an HTTP server")
@@ -261,7 +261,7 @@ func (server *Server) Run(ctx context.Context, options ...RunOption) error {
 	return err
 }
 
-func (server *Server) setupHandlers(ctx context.Context, cancel context.CancelFunc, pathPrefix string, counter *counter) http.Handler {
+func (server *Server) setupHandlers(ctx context.Context, gracefullCtx context.Context, cancel context.CancelFunc, pathPrefix string, counter *counter) http.Handler {
 	fs, err := fs.Sub(bindata.Fs, "static")
 	if err != nil {
 		log.Fatalf("failed to open static/ subdirectory of embedded filesystem: %v", err)
@@ -292,8 +292,8 @@ func (server *Server) setupHandlers(ctx context.Context, cancel context.CancelFu
 
 	wsMux := http.NewServeMux()
 	wsMux.Handle("/", siteHandler)
-	wsMux.HandleFunc(pathPrefix+"ws", server.generateHandleWS(ctx, cancel, counter))
-	wsMux.HandleFunc(pathPrefix+"asr/ws", server.generateHandleASRWS(ctx))
+	wsMux.HandleFunc(pathPrefix+"ws", server.generateHandleWS(ctx, gracefullCtx, cancel, counter))
+	wsMux.HandleFunc(pathPrefix+"asr/ws", server.generateHandleASRWS(ctx, gracefullCtx))
 
 	// Register API routes
 	if server.options.EnableAPI {
