@@ -13,6 +13,9 @@ const STORAGE_THEME = "gotty-theme";
 const STORAGE_FONT_SIZE = "gotty-font-size";
 const STORAGE_FONT_FAMILY = "gotty-font-family";
 
+const DEFAULT_THEME = "nord";
+const DEFAULT_FONT_FAMILY = "'Source Code Pro', monospace";
+
 const FONT_SIZES = [10, 12, 14, 16, 18, 20, 24];
 
 interface FontFamilyOption {
@@ -61,7 +64,7 @@ function applyFontPrefs(term: Terminal | undefined) {
             term.options.fontSize = n;
         }
     }
-    const ff = localStorage.getItem(STORAGE_FONT_FAMILY);
+    const ff = localStorage.getItem(STORAGE_FONT_FAMILY) || DEFAULT_FONT_FAMILY;
     if (ff) {
         term.options.fontFamily = ff;
     }
@@ -267,9 +270,9 @@ export function initThemePicker(term?: Terminal): void {
     const panel = document.createElement("div");
     panel.className = "panel";
 
-    let activeThemeName = localStorage.getItem(STORAGE_THEME) || "default";
+    let activeThemeName = localStorage.getItem(STORAGE_THEME) || (themes[DEFAULT_THEME] ? DEFAULT_THEME : "default");
     let activeFontSize = localStorage.getItem(STORAGE_FONT_SIZE) || "";
-    let activeFontFamily = localStorage.getItem(STORAGE_FONT_FAMILY) || "";
+    let activeFontFamily = localStorage.getItem(STORAGE_FONT_FAMILY) || DEFAULT_FONT_FAMILY;
 
     // Restore saved preferences on load
     if (activeThemeName && themes[activeThemeName]) {
