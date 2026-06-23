@@ -259,7 +259,7 @@ export function initThemePicker(term?: Terminal): void {
     btn.id = "gotty-theme-btn";
     btn.type = "button";
     btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M4.5 3.5h7M8 3.5v9M5.5 12.5h5M3 6h10" stroke="rgba(255,255,255,0.7)" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-    btn.title = "显示设置";
+    btn.title = "Display settings";
     btn.setAttribute("aria-label", "Display settings");
     document.body.appendChild(btn);
 

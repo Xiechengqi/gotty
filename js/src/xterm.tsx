@@ -48,9 +48,9 @@ class DropOverlay {
         this.elem.innerHTML = `
             <div class="gotty-drop-content">
                 <div class="drop-icon">📁</div>
-                <div class="drop-text">拖放文件到此处上传</div>
+                <div class="drop-text">Drop files here to upload</div>
                 <div class="file-list"></div>
-                <div class="drop-hint">释放鼠标以上传</div>
+                <div class="drop-hint">Release to upload</div>
             </div>
         `;
         document.body.appendChild(this.elem);
@@ -151,7 +151,7 @@ class UploadProgressModal extends Component<UploadProgressModalProps, UploadProg
 
         if (props.task.status === 'completed') {
             newState.progress = 100;
-            newState.speed = '完成';
+            newState.speed = 'Done';
             newState.remaining = '';
             newState.status = 'completed';
         } else if (props.task.status === 'cancelled') {
@@ -167,10 +167,10 @@ class UploadProgressModal extends Component<UploadProgressModalProps, UploadProg
                 const totalTime = elapsed / (props.task.progress / 100);
                 const remaining = Math.ceil((totalTime - elapsed) / 1000);
                 newState.remaining = remaining > 60
-                    ? `${Math.ceil(remaining / 60)} 分`
-                    : `${remaining} 秒`;
+                    ? `${Math.ceil(remaining / 60)} min`
+                    : `${remaining} sec`;
             } else {
-                newState.remaining = '计算中...';
+                newState.remaining = 'Calculating...';
             }
 
             newState.transferred = UploadProgressModal.formatSize(
@@ -202,16 +202,16 @@ class UploadProgressModal extends Component<UploadProgressModalProps, UploadProg
 
         const progressBarClass = status === 'error' ? 'bg-danger' :
             status === 'cancelled' ? 'bg-warning' : 'bg-primary';
-        const progressText = status === 'completed' ? '上传完成' :
-            status === 'cancelled' ? '已取消' :
-                status === 'error' ? '上传失败' : '';
+        const progressText = status === 'completed' ? 'Upload complete' :
+            status === 'cancelled' ? 'Cancelled' :
+                status === 'error' ? 'Upload failed' : '';
 
         return (
             <div class="modal fade gotty-upload-modal" ref={this.modalRef} tabIndex={-1}>
                 <div class="modal-dialog modal-dialog-centered">
                     <div class="modal-content">
                         <div class="modal-header">
-                            <h5 class="modal-title">上传文件</h5>
+                            <h5 class="modal-title">Upload file</h5>
                             {status === 'uploading' && (
                                 <button type="button" class="btn-close" onClick={this.handleDismiss}></button>
                             )}
@@ -239,11 +239,11 @@ class UploadProgressModal extends Component<UploadProgressModalProps, UploadProg
 
                                     <div class="upload-stats">
                                         <span class="upload-speed">{speed}</span>
-                                        <span class="upload-remaining">剩余 {remaining}</span>
+                                        <span class="upload-remaining">Remaining {remaining}</span>
                                     </div>
 
                                     <div class="text-center mt-2 text-muted" style={{ fontSize: '12px' }}>
-                                        已传输: {transferred}
+                                        Transferred: {transferred}
                                     </div>
                                 </div>
                             ) : (
@@ -259,11 +259,11 @@ class UploadProgressModal extends Component<UploadProgressModalProps, UploadProg
                         <div class="modal-footer">
                             {status === 'uploading' ? (
                                 <button class="btn btn-outline-secondary" onClick={this.handleCancel}>
-                                    取消上传
+                                    Cancel upload
                                 </button>
                             ) : (
                                 <button class="btn btn-primary" onClick={this.handleDismiss}>
-                                    确定
+                                    OK
                                 </button>
                             )}
                         </div>
@@ -373,15 +373,16 @@ export class GoTTYXterm {
         // 创建连接数显示
         this.connectionCountElem = elem.ownerDocument.createElement("div");
         this.connectionCountElem.className = "connection-count";
-        this.connectionCountElem.style.cssText = "position:fixed;top:10px;right:10px;background:rgba(0,0,0,0.7);color:#fff;padding:5px 10px;border-radius:4px;font-size:12px;z-index:1000;";
-        this.connectionCountElem.textContent = "连接数: 1";
+        this.connectionCountElem.title = "Connections";
+        this.connectionCountElem.style.cssText = "position:fixed;top:10px;right:10px;min-width:52px;height:28px;background:rgba(0,0,0,0.7);color:#fff;padding:0 8px;border-radius:4px;font-size:12px;z-index:1000;display:flex;align-items:center;justify-content:center;gap:6px;box-sizing:border-box;";
+        this.renderConnectionCount(1);
         elem.appendChild(this.connectionCountElem);
 
         // 创建清理历史按钮
         this.clearHistoryBtn = elem.ownerDocument.createElement("button");
         this.clearHistoryBtn.className = "clear-history-btn";
         this.clearHistoryBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M2 5h12M5 5V3h6v2M7 7v6M9 7v6M4 5v9a1 1 0 001 1h6a1 1 0 001-1V5" stroke="rgba(255,255,255,0.7)" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-        this.clearHistoryBtn.title = "清除历史消息";
+        this.clearHistoryBtn.title = "Clear history";
         this.clearHistoryBtn.style.cssText = "position:fixed;top:74px;right:10px;width:28px;height:28px;background:rgba(0,0,0,0.7);color:#fff;padding:0;border-radius:4px;font-size:12px;z-index:1000;cursor:pointer;border:none;display:flex;align-items:center;justify-content:center;";
         this.clearHistoryBtn.addEventListener('click', () => {
             this.clearHistory();
@@ -392,7 +393,7 @@ export class GoTTYXterm {
         this.uploadBtn = elem.ownerDocument.createElement("button");
         this.uploadBtn.className = "upload-btn";
         this.uploadBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M8 11V3M8 3L5 6M8 3l3 3M3 13h10" stroke="rgba(255,255,255,0.7)" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-        this.uploadBtn.title = "上传文件";
+        this.uploadBtn.title = "Upload file";
         this.uploadBtn.style.cssText = "position:fixed;top:106px;right:10px;width:28px;height:28px;background:rgba(0,0,0,0.7);color:#fff;padding:0;border-radius:4px;font-size:12px;z-index:1000;cursor:pointer;border:none;display:flex;align-items:center;justify-content:center;";
         this.uploadBtn.addEventListener('click', () => {
             this.fileInput.click();
@@ -403,7 +404,7 @@ export class GoTTYXterm {
         this.restartBtn = elem.ownerDocument.createElement("button");
         this.restartBtn.className = "restart-btn";
         this.restartBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M13 6a5 5 0 10-1.46 3.54M13 6V2.5M13 6H9.5" stroke="rgba(255,255,255,0.7)" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-        this.restartBtn.title = "重启";
+        this.restartBtn.title = "Restart";
         this.restartBtn.style.cssText = "position:fixed;top:138px;right:10px;width:28px;height:28px;background:rgba(0,0,0,0.7);color:#fff;padding:0;border-radius:4px;font-size:12px;z-index:1000;cursor:pointer;border:none;display:flex;align-items:center;justify-content:center;";
         this.restartBtn.addEventListener('click', () => {
             window.location.reload();
@@ -427,7 +428,7 @@ export class GoTTYXterm {
             this.terminalStateElem = elem.ownerDocument.createElement("div");
             this.terminalStateElem.className = "terminal-state";
             this.terminalStateElem.style.cssText = "position:fixed;top:170px;right:10px;background:rgba(0,0,0,0.7);color:#fff;padding:4px 8px;border-radius:4px;font-size:11px;z-index:1000;";
-            this.terminalStateElem.textContent = "尺寸策略: --";
+            this.terminalStateElem.textContent = "Size policy: --";
             elem.appendChild(this.terminalStateElem);
         }
 
@@ -438,7 +439,7 @@ export class GoTTYXterm {
         // 创建 API 执行指示器（默认隐藏）
         this.apiIndicatorElem = elem.ownerDocument.createElement("div");
         this.apiIndicatorElem.className = "gotty-api-indicator";
-        this.apiIndicatorElem.innerHTML = '<span class="api-indicator-dot"></span> API 执行中';
+        this.apiIndicatorElem.innerHTML = '<span class="api-indicator-dot"></span> API running';
         document.body.appendChild(this.apiIndicatorElem);
 
         // Auto-copy selection to clipboard
@@ -568,13 +569,13 @@ export class GoTTYXterm {
         const fileSize = file.size;
 
         if (fileSize === 0) {
-            this.showMessage(`${fileName} 为空文件`, 3000);
+            this.showMessage(`${fileName} is empty`, 3000);
             return;
         }
 
         const chunkSize = this.getUploadChunkSize(fileName, fileSize);
         if (chunkSize <= 0) {
-            this.showMessage(`上传 ${fileName} 失败: 分块过大`, 3000);
+            this.showMessage(`Upload failed for ${fileName}: chunk too large`, 3000);
             return;
         }
 
@@ -599,7 +600,7 @@ export class GoTTYXterm {
 
         // Notify upload start
         this.uploadCallbacks.forEach((cb) => cb(fileName, 0));
-        this.showMessage(`正在上传 ${fileName}...`, 0);
+        this.showMessage(`Uploading ${fileName}...`, 0);
 
         try {
             const arrayBuffer = await file.arrayBuffer();
@@ -608,7 +609,7 @@ export class GoTTYXterm {
             for (let chunk = 0; chunk < totalChunks; chunk++) {
                 // 检查是否已取消
                 if (this.currentUploadTask?.status === 'cancelled') {
-                    this.showMessage(`已取消上传: ${fileName}`, 3000);
+                    this.showMessage(`Upload cancelled: ${fileName}`, 3000);
                     this.hideUploadModal();
                     return;
                 }
@@ -657,13 +658,13 @@ export class GoTTYXterm {
             // 上传完成 - 等待用户点击确定按钮关闭
             uploadTask.status = 'completed';
             uploadTask.progress = 100;
-            this.showMessage(`${fileName} 上传成功`, 3000);
+            this.showMessage(`${fileName} uploaded successfully`, 3000);
             // 不自动关闭模态框，等待用户点击确定按钮
 
         } catch (error) {
             console.error('Upload failed:', error);
             uploadTask.status = 'error';
-            this.showMessage(`上传 ${fileName} 失败`, 3000);
+            this.showMessage(`Upload failed for ${fileName}`, 3000);
         }
     }
 
@@ -895,8 +896,12 @@ export class GoTTYXterm {
         });
     };
 
+    private renderConnectionCount(count: number) {
+        this.connectionCountElem.innerHTML = `<svg width="14" height="14" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M5.5 7.2a2.2 2.2 0 100-4.4 2.2 2.2 0 000 4.4zM10.5 7.2a2.2 2.2 0 100-4.4 2.2 2.2 0 000 4.4zM2.5 13.2c.3-2.1 1.6-3.4 3-3.4s2.7 1.3 3 3.4M7.5 12.4c.5-1.6 1.6-2.6 3-2.6 1.5 0 2.8 1.3 3 3.4" stroke="rgba(255,255,255,0.7)" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>${count}</span>`;
+    };
+
     updateConnectionCount(count: number) {
-        this.connectionCountElem.textContent = `连接数: ${count}`;
+        this.renderConnectionCount(count);
     };
 
     updateTerminalState(state: TerminalStatePayload) {
@@ -905,7 +910,7 @@ export class GoTTYXterm {
         }
         const leader = state.leaderClientId || "-";
         const size = `${state.activeCols}x${state.activeRows}`;
-        this.terminalStateElem.textContent = `尺寸: ${size} | 策略: ${state.policy} | leader: ${leader}`;
+        this.terminalStateElem.textContent = `Size: ${size} | Policy: ${state.policy} | leader: ${leader}`;
     };
 
     showAPIIndicator(execId: string) {
@@ -1025,7 +1030,7 @@ export class GoTTYXterm {
         this.sendInput(this.encoder.encode("clear\n"));
         // Clear local terminal display
         this.term.clear();
-        this.showMessage("历史消息已清除", 2000);
+        this.showMessage("History cleared", 2000);
     }
 
     close(): void {
