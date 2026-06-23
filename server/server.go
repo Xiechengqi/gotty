@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	noesctmpl "text/template"
@@ -29,8 +30,9 @@ import (
 
 // Server provides a webtty HTTP endpoint.
 type Server struct {
-	factory Factory
-	options *Options
+	factory      Factory
+	options      *Options
+	clientGoneCh chan<- string
 
 	upgrader         *websocket.Upgrader
 	indexTemplate    *template.Template
@@ -58,6 +60,9 @@ func New(factory Factory, options *Options) (*Server, error) {
 			return nil, errors.Wrapf(err, "failed to read custom index file at `%s`", path)
 		}
 	}
+	if options.IndexRewrite != nil {
+		indexData = []byte(options.IndexRewrite(string(indexData)))
+	}
 	indexTemplate, err := template.New("index").Parse(string(indexData))
 	if err != nil {
 		panic("index template parse failed") // must be valid
@@ -73,30 +78,42 @@ func New(factory Factory, options *Options) (*Server, error) {
 	}
 
 	titleTemplate, err := noesctmpl.New("title").Parse(options.TitleFormat)
+
+	// Resolve favicon: local file paths are read and converted to inline
+	// base64 data URIs; URLs and data URIs are passed through as-is.
+	if options.Favicon != "" {
+		resolved, err := resolveFavicon(options.Favicon)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to resolve favicon `%s`", options.Favicon)
+		}
+		options.Favicon = resolved
+		log.Printf("Custom favicon configured: %s", truncateForLog(options.Favicon))
+	}
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to parse window title format `%s`", options.TitleFormat)
 	}
 
-	var originChekcer func(r *http.Request) bool
+	var originChecker func(r *http.Request) bool
 	if options.WSOrigin != "" {
 		matcher, err := regexp.Compile(options.WSOrigin)
 		if err != nil {
 			return nil, errors.Wrapf(err, "failed to compile regular expression of Websocket Origin: %s", options.WSOrigin)
 		}
-		originChekcer = func(r *http.Request) bool {
+		originChecker = func(r *http.Request) bool {
 			return matcher.MatchString(r.Header.Get("Origin"))
 		}
 	}
 
 	return &Server{
-		factory: factory,
-		options: options,
+		factory:      factory,
+		options:      options,
+		clientGoneCh: options.ClientGoneCh,
 
 		upgrader: &websocket.Upgrader{
 			ReadBufferSize:  1024,
 			WriteBufferSize: 1024,
 			Subprotocols:    webtty.Protocols,
-			CheckOrigin:     originChekcer,
+			CheckOrigin:     originChecker,
 		},
 		indexTemplate:    indexTemplate,
 		titleTemplate:    titleTemplate,
@@ -196,41 +213,63 @@ func (server *Server) Run(ctx context.Context, options ...RunOption) error {
 	if server.options.Port == "0" {
 		log.Printf("Port number configured to `0`, choosing a random port")
 	}
-	hostPort := net.JoinHostPort(server.options.Address, server.options.Port)
-	listener, err := net.Listen("tcp", hostPort)
-	if err != nil {
-		return errors.Wrapf(err, "failed to listen at `%s`", hostPort)
+
+	// Parse comma-separated addresses for multi-interface binding
+	addrs := strings.Split(server.options.Address, ",")
+	for i := range addrs {
+		addrs[i] = strings.TrimSpace(addrs[i])
 	}
 
 	scheme := "http"
 	if server.options.EnableTLS {
 		scheme = "https"
 	}
-	host, port, _ := net.SplitHostPort(listener.Addr().String())
-	log.Printf("HTTP server is listening at: %s", scheme+"://"+net.JoinHostPort(host, port)+path)
+
+	var crtFile, keyFile string
+	if server.options.EnableTLS {
+		crtFile = homedir.Expand(server.options.TLSCrtFile)
+		keyFile = homedir.Expand(server.options.TLSKeyFile)
+		log.Printf("TLS crt file: %s", crtFile)
+		log.Printf("TLS key file: %s", keyFile)
+	}
+
+	listeners := make([]net.Listener, 0, len(addrs))
+	for _, addr := range addrs {
+		hostPort := net.JoinHostPort(addr, server.options.Port)
+		listener, err := net.Listen("tcp", hostPort)
+		if err != nil {
+			for _, l := range listeners {
+				l.Close()
+			}
+			return errors.Wrapf(err, "failed to listen at `%s`", hostPort)
+		}
+		listeners = append(listeners, listener)
+
+		host, port, _ := net.SplitHostPort(listener.Addr().String())
+		log.Printf("HTTP server is listening at: %s", scheme+"://"+net.JoinHostPort(host, port)+path)
+	}
 	if server.options.Address == "0.0.0.0" {
+		_, port, _ := net.SplitHostPort(listeners[0].Addr().String())
 		for _, address := range listAddresses() {
 			log.Printf("Alternative URL: %s", scheme+"://"+net.JoinHostPort(address, port)+path)
 		}
 	}
 
-	srvErr := make(chan error, 1)
-	go func() {
-		var sErr error
-		if server.options.EnableTLS {
-			crtFile := homedir.Expand(server.options.TLSCrtFile)
-			keyFile := homedir.Expand(server.options.TLSKeyFile)
-			log.Printf("TLS crt file: " + crtFile)
-			log.Printf("TLS key file: " + keyFile)
-
-			sErr = srv.ServeTLS(listener, crtFile, keyFile)
-		} else {
-			sErr = srv.Serve(listener)
-		}
-		if sErr != nil {
-			srvErr <- sErr
-		}
-	}()
+	srvErr := make(chan error, len(listeners))
+	for _, listener := range listeners {
+		l := listener // capture
+		go func() {
+			var serveErr error
+			if server.options.EnableTLS {
+				serveErr = srv.ServeTLS(l, crtFile, keyFile)
+			} else {
+				serveErr = srv.Serve(l)
+			}
+			if serveErr != nil {
+				srvErr <- serveErr
+			}
+		}()
+	}
 
 	go func() {
 		select {
@@ -246,6 +285,7 @@ func (server *Server) Run(ctx context.Context, options ...RunOption) error {
 			err = nil
 		} else {
 			cancel()
+			srv.Close()
 		}
 	case <-cctx.Done():
 		srv.Close()
@@ -279,6 +319,7 @@ func (server *Server) setupHandlers(ctx context.Context, gracefullCtx context.Co
 	siteMux.HandleFunc(pathPrefix+"manifest.json", server.handleManifest)
 	siteMux.HandleFunc(pathPrefix+"auth_token.js", server.handleAuthToken)
 	siteMux.HandleFunc(pathPrefix+"config.js", server.handleConfig)
+	siteMux.HandleFunc(pathPrefix+"themes.js", server.handleThemes)
 
 	siteHandler := http.Handler(siteMux)
 
@@ -341,4 +382,57 @@ func (server *Server) tlsConfig() (*tls.Config, error) {
 		ClientAuth: tls.RequireAndVerifyClientCert,
 	}
 	return tlsConfig, nil
+}
+
+// resolveFavicon converts a favicon reference into a ready-to-use href value.
+//   - Local file paths are read from disk and converted to inline base64 data URIs.
+//   - HTTP(S) URLs, data URIs, and protocol-relative URLs are passed through as-is.
+//   - File expansion (~ → $HOME) is applied for local paths.
+func resolveFavicon(raw string) (string, error) {
+	// Pass through URLs, data URIs, and protocol-relative URLs
+	if strings.HasPrefix(raw, "http://") ||
+		strings.HasPrefix(raw, "https://") ||
+		strings.HasPrefix(raw, "data:") ||
+		strings.HasPrefix(raw, "//") {
+		return raw, nil
+	}
+
+	// Treat as local file path
+	path := homedir.Expand(raw)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	mime := mimeByExt(filepath.Ext(path))
+	encoded := base64.StdEncoding.EncodeToString(data)
+	return "data:" + mime + ";base64," + encoded, nil
+}
+
+// mimeByExt returns the MIME type for common favicon file extensions.
+func mimeByExt(ext string) string {
+	switch strings.ToLower(ext) {
+	case ".png":
+		return "image/png"
+	case ".ico":
+		return "image/x-icon"
+	case ".svg":
+		return "image/svg+xml"
+	case ".gif":
+		return "image/gif"
+	case ".jpg", ".jpeg":
+		return "image/jpeg"
+	case ".webp":
+		return "image/webp"
+	default:
+		return "image/png"
+	}
+}
+
+// truncateForLog shortens a data URI string for log output so we don't
+// print multi-kilobyte base64 blobs in the startup log.
+func truncateForLog(s string) string {
+	if strings.HasPrefix(s, "data:") && len(s) > 120 {
+		return s[:100] + "..." + s[len(s)-20:]
+	}
+	return s
 }

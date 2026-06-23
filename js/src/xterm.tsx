@@ -1,7 +1,9 @@
-import { IDisposable, Terminal } from "xterm";
-import { FitAddon } from 'xterm-addon-fit';
-import { WebLinksAddon } from 'xterm-addon-web-links';
-import { WebglAddon } from 'xterm-addon-webgl';
+import { IDisposable, Terminal } from "@xterm/xterm";
+import { Unicode11Addon } from '@xterm/addon-unicode11';
+import { FitAddon } from '@xterm/addon-fit';
+import { WebLinksAddon } from '@xterm/addon-web-links';
+import { WebglAddon } from '@xterm/addon-webgl';
+import { ImageAddon } from '@xterm/addon-image';
 import { ZModemAddon } from "./zmodem";
 import { TerminalStatePayload } from "./webtty";
 import { render, createRef, Component } from 'preact';
@@ -285,7 +287,6 @@ class UploadProgressModal extends Component<UploadProgressModalProps, UploadProg
 }
 
 // ==================== 主类 ====================
-
 export class GoTTYXterm {
     // The HTMLElement that contains our terminal
     elem: HTMLElement;
@@ -299,7 +300,7 @@ export class GoTTYXterm {
 
     message: HTMLElement;
     messageTimeout: number;
-    messageTimer: NodeJS.Timeout;
+    messageTimer!: NodeJS.Timeout;
 
     connectionCountElem: HTMLElement;
     clearHistoryBtn: HTMLElement;
@@ -309,13 +310,13 @@ export class GoTTYXterm {
     private apiIndicatorElem: HTMLElement | null = null;
     private showTerminalStateOverlay: boolean;
 
-    onResizeHandler: IDisposable;
-    onDataHandler: IDisposable;
+    onResizeHandler!: IDisposable;
+    onDataHandler!: IDisposable;
 
     fitAddOn: FitAddon;
     zmodemAddon: ZModemAddon;
-    toServer: (data: string | Uint8Array) => void;
-    encoder: TextEncoder
+    toServer!: (data: string | Uint8Array) => void;
+    encoder: TextEncoder;
     sendUploadFile?: (msg: string) => void;
     private uploadMaxMessageSize = 1024;
 
@@ -331,25 +332,37 @@ export class GoTTYXterm {
     private connectTime: number = 0;
     private selectionCallbacks: Set<() => void> = new Set();
     private uploadCallbacks: Set<(fileName: string, progress: number) => void> = new Set();
+    altIsMeta: boolean = false;
 
-    constructor(elem: HTMLElement) {
+    constructor(elem: HTMLElement, preferences: Record<string, unknown> = {}) {
         this.elem = elem;
         this.showTerminalStateOverlay =
             (typeof gotty_show_terminal_state !== 'undefined') ? !!gotty_show_terminal_state : false;
+        this.encoder = new TextEncoder();
         this.term = new Terminal({
+            allowProposedApi: true,
+            customGlyphs: true,
+            rescaleOverlappingGlyphs: true,
             theme: {
                 background: 'rgb(40, 41, 53)'
             },
             scrollback: 500
         });
+
+        const unicode11Addon = new Unicode11Addon();
+        this.term.loadAddon(unicode11Addon);
+        this.term.unicode.activeVersion = '11';
+
+        this.setPreferences(preferences);
+
         this.fitAddOn = new FitAddon();
         this.zmodemAddon = new ZModemAddon({
             toTerminal: (x: Uint8Array) => this.term.write(x),
             toServer: (x: Uint8Array) => this.sendInput(x)
         });
-        this.encoder = new TextEncoder();
         this.term.loadAddon(new WebLinksAddon());
         this.term.loadAddon(this.fitAddOn);
+        this.term.loadAddon(new ImageAddon());
         this.term.loadAddon(this.zmodemAddon);
 
         this.message = elem.ownerDocument.createElement("div");
@@ -446,8 +459,18 @@ export class GoTTYXterm {
         };
 
         this.term.open(elem);
+
+        try {
+            this.term.loadAddon(new WebglAddon());
+        } catch (e) {
+            console.warn("WebGL renderer failed to load, using canvas fallback", e);
+        }
+
         this.fitTerminal();
         this.term.focus();
+
+        // Pre-register the alt_is_meta handler; it's a no-op unless altIsMeta is true.
+        this.setupAltIsMeta();
 
         window.addEventListener("resize", this.resizeListener);
         window.addEventListener("orientationchange", this.resizeListener);
@@ -464,11 +487,12 @@ export class GoTTYXterm {
 
         // Bind to window to ensure we capture all drag events
         // This prevents Chrome from opening dropped files
+        const preventDefaultDrag = (e: Event) => {
+            e.preventDefault();
+            e.stopPropagation();
+        };
         ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
-            window.addEventListener(eventName, (e: DragEvent) => {
-                e.preventDefault();
-                e.stopPropagation();
-            }, false);
+            window.addEventListener(eventName, preventDefaultDrag, false);
         });
 
         // Show overlay on drag enter
@@ -769,15 +793,93 @@ export class GoTTYXterm {
         document.title = title;
     };
 
-    setPreferences(value: object) {
-        Object.keys(value).forEach((key) => {
-            if (key == "EnableWebGL" && key) {
-                this.term.loadAddon(new WebglAddon());
-            } else if (key == "font-size") {
-                this.term.options.fontSize = value[key]
-            } else if (key == "font-family") {
-                this.term.options.fontFamily = value[key]
+    setPreferences(value?: Record<string, unknown> | null) {
+        if (!value) {
+            return;
+        }
+
+        // Apply font settings first so the renderer initializes with the
+        // correct font metrics before any renderer-specific logic.
+        const keys = Object.keys(value);
+        const fontKeys = keys.filter(k => k === "font-family" || k === "font-size");
+        const otherKeys = keys.filter(k => k !== "font-family" && k !== "font-size");
+
+        for (const key of [...fontKeys, ...otherKeys]) {
+            switch (key) {
+                case "font-family":
+                    this.term.options.fontFamily = value[key] as string;
+                    break;
+                case "font-size":
+                    this.term.options.fontSize = value[key] as number;
+                    break;
+                case "EnableWebGL":
+                    // Already loaded by default in constructor — skip to avoid
+                    // orphaning the first WebglAddon with a duplicate.
+                    break;
+                case "cursor-blink":
+                    this.term.options.cursorBlink = value[key] as boolean;
+                    break;
+                case "cursor-style":
+                    this.term.options.cursorStyle = value[key] as "block" | "underline" | "bar";
+                    break;
+                case "scrollback-lines":
+                    this.term.options.scrollback = value[key] as number;
+                    break;
+                case "theme":
+                    this.term.options.theme = value[key] as object;
+                    break;
+                case "alt-is-meta":
+                    this.altIsMeta = value[key] as boolean;
+                    break;
             }
+        }
+    };
+
+    setupAltIsMeta() {
+        this.term.attachCustomKeyEventHandler((event: KeyboardEvent) => {
+            if (!this.altIsMeta) return true;
+
+            // Only handle Alt+key without Ctrl/Meta
+            if (!event.altKey || event.ctrlKey || event.metaKey) return true;
+
+            // Skip special keys that should be handled by the browser
+            // (Tab, arrows, function keys, etc.)
+            if (event.code.startsWith('Alt') || event.code === 'Tab') return true;
+
+            // Determine the character to send with the Escape prefix
+            let char: string | null = null;
+
+            if (event.code.startsWith('Key') && event.code.length === 4) {
+                // Letter keys: use event.code to get the base character,
+                // which works correctly on macOS where Option composes characters
+                const letter = event.code[3];
+                char = event.shiftKey ? letter : letter.toLowerCase();
+            } else if (event.code.startsWith('Digit') && event.code.length === 6) {
+                // Digit keys: handle unshifted digits and shifted symbols
+                const digit = event.code[5];
+                if (!event.shiftKey) {
+                    char = digit;
+                } else {
+                    // Shifted digit keys produce symbols; use event.key
+                    if (event.key.length === 1) {
+                        char = event.key;
+                    }
+                }
+            } else if (event.key === ' ') {
+                // Alt+Space -> M-SPC
+                char = ' ';
+            } else if (event.key.length === 1 && event.key !== ' ') {
+                // Other single-character keys (., /, ;, ', [, ], etc.)
+                char = event.key;
+            }
+
+            if (char !== null) {
+                event.preventDefault();
+                this.toServer(this.encoder.encode('\x1b' + char));
+                return false;
+            }
+
+            return true;
         });
     };
 
@@ -815,7 +917,8 @@ export class GoTTYXterm {
         return this.toServer(data)
     }
 
-    onInput(callback: (input: string) => void) {
+    onInput(callback: (input: string | Uint8Array) => void) {
+        this.encoder = new TextEncoder()
         this.toServer = callback;
 
         // I *think* we're ok like this, but if not, we can dispose

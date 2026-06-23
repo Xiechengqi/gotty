@@ -398,10 +398,12 @@ export class VoiceInput {
             if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
             if (!this.captureEnabled) return;
 
-            const input = new Float32Array(e.inputBuffer.getChannelData(0));
-            const samples = this.downsampleBuffer(input, this.expectedSampleRate);
-            this.ws.send(samples);
-        };
+			const input = new Float32Array(e.inputBuffer.getChannelData(0));
+			const samples = this.downsampleBuffer(input, this.expectedSampleRate);
+			const payload = new ArrayBuffer(samples.byteLength);
+			new Float32Array(payload).set(samples);
+			this.ws.send(payload);
+		};
 
         source.connect(this.recorder);
         this.recorder.connect(gain);

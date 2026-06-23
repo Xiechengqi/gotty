@@ -4,6 +4,12 @@
 <head>
   <title>{{ .title }}</title>
   <link rel="manifest" href="manifest.json" crossorigin="use-credentials">
+  {{ if .favicon }}
+  <link rel="icon" href="{{ .favicon }}">
+  {{ else }}
+  <link rel="icon" href="favicon.ico">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  {{ end }}
   <link rel="stylesheet" href="./css/index.css" />
   <link rel="stylesheet" href="./css/xterm.css" />
   <link rel="stylesheet" href="./css/xterm_customize.css" />
@@ -14,6 +20,7 @@
   <div id="terminal"></div>
   <script src="./auth_token.js"></script>
   <script src="./config.js"></script>
+  <script src="./themes.js"></script>
   <script src="./js/gotty.js"></script>
 </body>
 

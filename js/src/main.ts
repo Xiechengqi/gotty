@@ -1,9 +1,10 @@
 import { ConnectionFactory } from "./websocket";
 import { WebTTY, protocols } from "./webtty";
-import { OurXterm } from "./xterm";
+import { GoTTYXterm } from "./xterm";
 import { createIdleAlert } from "./idle-alert";
 import { installFaviconAlert } from "./favicon-alert";
 import { VoiceInput } from "./voice-input";
+import { initThemePicker } from "./theme-picker";
 
 // @TODO remove these
 declare var gotty_auth_token: string;
@@ -15,6 +16,7 @@ declare var gotty_idle_alert_timeout: number;
 declare var gotty_enable_asr: boolean;
 declare var gotty_asr_hold_ms: number;
 declare var gotty_asr_hotkey: string;
+declare var gotty_preferences: Record<string, unknown>;
 
 // Helper function to get cookie value
 function getCookie(name: string): string | null {
@@ -44,8 +46,9 @@ try {
 const elem = document.getElementById("terminal")
 
 if (elem !== null) {
-    var term: OurXterm;
-    term = new OurXterm(elem);
+    var term: GoTTYXterm;
+    term = new GoTTYXterm(elem, gotty_preferences);
+    initThemePicker(term.term);
 
     const subscribeTermActivity = (cb: () => void) => {
         const unsubOutput = term.onOutput(cb);

@@ -1,12 +1,13 @@
 import { Component, ComponentChildren, createRef, render } from "preact";
-import { ITerminalAddon, Terminal } from "xterm";
-import { Browser, Detection, Offer, Sentry, Session } from 'zmodem.js/src/zmodem_browser';
+import { ITerminalAddon, Terminal } from "@xterm/xterm";
+import { Browser, Detection, Offer, Sentry, Session } from "zmodem.js";
 import { Button, MyModal } from "./MyModal";
 
 export class ZModemAddon implements ITerminalAddon {
-    term: Terminal;
-    elem: HTMLDivElement;
-    sentry: Sentry;
+    term!: Terminal;
+    elem!: HTMLDivElement;
+    sentry!: Sentry;
+
     toTerminal: (data: Uint8Array) => void;
     toServer: (data: Uint8Array) => void;
 
@@ -27,7 +28,12 @@ export class ZModemAddon implements ITerminalAddon {
     }
 
     consume(data: Uint8Array) {
-        this.sentry.consume(data)
+        try {
+            this.sentry.consume(data)
+        } catch (e) {
+            console.warn("ZModem protocol error:", e);
+            this.reset();
+        }
     }
 
     activate(terminal: Terminal): void {
@@ -106,7 +112,7 @@ interface ReceiveFileModalState {
 }
 
 export class ReceiveFileModal extends Component<ReceiveFileModalProps, ReceiveFileModalState> {
-    constructor(props) {
+    constructor(props: ReceiveFileModalProps) {
         super(props)
         this.setState({ state: "notstarted" })
     }
@@ -209,15 +215,17 @@ export class SendFileModal extends Component<SendFileModalProps, SendFileModalSt
     send() {
         Browser.send_files(this.props.session,
             this.filePickerRef.current!.files, {
-            on_offer_response: (f, xfer) => { this.setState({ state: "started" }) },
-        }).then(() => {
-            this.setState({ state: "done" })
-            this.props.session.close()
+                on_offer_response: (f, xfer) => {
+                    this.setState({ state: "started" })
+                },
+            }
+        ).then(() => {
+            this.setState({ state: "done" });
+            this.props.session.close();
             if (this.props.onFinish !== undefined) {
                 this.props.onFinish();
             }
-        })
-            .catch(e => console.log(e));
+        }).catch(e => console.log(e));
     }
 
     render() {

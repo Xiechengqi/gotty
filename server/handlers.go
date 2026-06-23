@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/pkg/errors"
@@ -89,6 +90,9 @@ func (server *Server) generateHandleWS(ctx context.Context, gracefullCtx context
 			closeReason = server.factory.Name()
 		case webtty.ErrMasterClosed:
 			closeReason = "client"
+			if server.clientGoneCh != nil {
+				server.clientGoneCh <- r.RemoteAddr
+			}
 		default:
 			closeReason = fmt.Sprintf("an error: %s", err)
 		}
@@ -114,6 +118,32 @@ func (server *Server) processWSConn(ctx context.Context, conn *websocket.Conn, h
 	}
 	if init.AuthToken != server.options.Credential {
 		return errors.New("failed to authenticate websocket connection")
+	}
+
+	// Set up server-side WebSocket ping/pong to keep the connection alive
+	// when the browser tab is in the background (where JS timers are throttled).
+	pingInterval := server.options.PingInterval
+	if pingInterval > 0 {
+		conn.SetReadDeadline(time.Now().Add(time.Duration(pingInterval) * 2 * time.Second))
+		conn.SetPongHandler(func(string) error {
+			return conn.SetReadDeadline(time.Now().Add(time.Duration(pingInterval) * 2 * time.Second))
+		})
+		pingCtx, pingCancel := context.WithCancel(ctx)
+		defer pingCancel()
+		go func() {
+			ticker := time.NewTicker(time.Duration(pingInterval) * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ticker.C:
+					if err := conn.WriteControl(websocket.PingMessage, []byte{}, time.Now().Add(10*time.Second)); err != nil {
+						return
+					}
+				case <-pingCtx.Done():
+					return
+				}
+			}
+		}()
 	}
 
 	client := &Client{
@@ -250,6 +280,7 @@ func (server *Server) indexVariables(r *http.Request) (map[string]interface{}, e
 
 	indexVars := map[string]interface{}{
 		"title": titleBuf.String(),
+		"favicon": server.options.Favicon,
 	}
 	return indexVars, err
 }
@@ -277,6 +308,12 @@ func (server *Server) handleAuthToken(w http.ResponseWriter, r *http.Request) {
 
 func (server *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/javascript")
+	preferences, err := json.Marshal(server.buildPreferences())
+	if err != nil {
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+
 	lines := []string{
 		"var gotty_term = 'xterm';",
 		"var gotty_ws_query_args = '" + server.options.WSQueryArgs + "';",
@@ -295,9 +332,124 @@ func (server *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		"var gotty_leader_select = '" + server.options.LeaderSelect + "';",
 		"var gotty_leader_idle_ms = " + strconv.Itoa(server.options.LeaderIdleMs) + ";",
 		"var gotty_show_terminal_state = " + strconv.FormatBool(server.options.ShowTerminalState) + ";",
+		"var gotty_preferences = " + string(preferences) + ";",
 	}
 
 	w.Write([]byte(strings.Join(lines, "\n")))
+}
+
+func (server *Server) handleThemes(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/javascript")
+	themeJSON, err := json.Marshal(builtinThemes)
+	if err != nil {
+		http.Error(w, "Internal Server Error", 500)
+		return
+	}
+	w.Write([]byte("var gotty_themes = "))
+	w.Write(themeJSON)
+	w.Write([]byte(";\n"))
+}
+
+// buildPreferences assembles the terminal preferences map sent to the browser.
+// It starts by resolving the user's chosen theme (or the default), then
+// applies any individual config overrides on top.
+// Only non-zero values are included so xterm.js keeps its defaults for the rest.
+func (server *Server) buildPreferences() map[string]interface{} {
+	if server.options.Preferences == nil {
+		return map[string]interface{}{}
+	}
+
+	prefs := server.options.Preferences
+	out := make(map[string]interface{})
+
+	// Resolve theme
+	themeName := prefs.Theme
+	if themeName == "" {
+		themeName = "default"
+	}
+	themeColors := resolveTheme(themeName)
+
+	// Apply individual color overrides on top of the theme
+	applyIfSet := func(key, value string) {
+		if value != "" {
+			themeColors[key] = value
+			out["theme"] = themeColors
+		}
+	}
+
+	applyIfSet("foreground", prefs.ForegroundColor)
+	applyIfSet("background", prefs.BackgroundColor)
+	applyIfSet("cursor", prefs.CursorColor)
+	applyIfSet("cursorAccent", prefs.CursorAccent)
+	applyIfSet("selection", prefs.SelectionColor)
+
+	// If theme colors exist (non-empty), set the theme object
+	if len(themeColors) > 0 {
+		out["theme"] = themeColors
+	}
+
+	// Font options
+	if prefs.FontSize > 0 {
+		out["font-size"] = prefs.FontSize
+	}
+	if prefs.FontFamily != "" {
+		out["font-family"] = prefs.FontFamily
+	}
+
+	// Cursor options
+	if prefs.CursorStyle != "" {
+		out["cursor-style"] = prefs.CursorStyle
+	}
+	if prefs.CursorBlink {
+		out["cursor-blink"] = true
+	}
+
+	// Scrollback
+	if prefs.ScrollbackLines > 0 {
+		out["scrollback-lines"] = prefs.ScrollbackLines
+	}
+
+	// WebGL
+	if prefs.EnableWebGL {
+		out["EnableWebGL"] = true
+	}
+
+	// Alt as Meta key
+	if prefs.AltIsMeta {
+		out["alt-is-meta"] = true
+	}
+
+	// Color palette overrides (overrides built-in theme palette entries)
+	if len(prefs.ColorPaletteOverrides) > 0 {
+		palette := prefs.ColorPaletteOverrides
+		paletteMap := make(map[string]string)
+		colorKeys := []string{
+			"black", "red", "green", "yellow", "blue", "magenta", "cyan", "white",
+			"brightBlack", "brightRed", "brightGreen", "brightYellow",
+			"brightBlue", "brightMagenta", "brightCyan", "brightWhite",
+		}
+		for i, c := range palette {
+			if i >= len(colorKeys) {
+				break
+			}
+			if c != "" {
+				paletteMap[colorKeys[i]] = c
+			}
+		}
+		if len(paletteMap) > 0 {
+			// Merge palette into theme colors
+			currentTheme, _ := out["theme"].(map[string]string)
+			if currentTheme == nil {
+				currentTheme = make(map[string]string)
+			}
+			for k, v := range paletteMap {
+				currentTheme[k] = v
+			}
+			out["theme"] = currentTheme
+		}
+	}
+
+	return out
 }
 
 // titleVariables merges maps in a specified order.

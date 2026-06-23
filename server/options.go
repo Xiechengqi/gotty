@@ -5,7 +5,7 @@ import (
 )
 
 type Options struct {
-	Address             string `hcl:"address" flagName:"address" flagSName:"a" flagDescribe:"IP address to listen" default:"0.0.0.0"`
+	Address             string `hcl:"address" flagName:"address" flagSName:"a" flagDescribe:"IP address(es) to listen (comma-separated for multiple)" default:"0.0.0.0"`
 	Port                string `hcl:"port" flagName:"port" flagSName:"p" flagDescribe:"Port number to liten" default:"8080"`
 	Path                string `hcl:"path" flagName:"path" flagSName:"m" flagDescribe:"Base path" default:"/"`
 	PermitWrite         bool   `hcl:"permit_write" flagName:"permit-write" flagSName:"w" flagDescribe:"Permit clients to write to the TTY (BE CAREFUL)" default:"false"`
@@ -57,6 +57,51 @@ type Options struct {
 	ASRHotkey  string `hcl:"asr_hotkey" flagName:"asr-hotkey" flagDescribe:"KeyboardEvent.code for ASR hold-to-talk hotkey" default:"ShiftRight"`
 
 	TitleVariables map[string]interface{}
+
+	// Notify with RemoteAddr when client disconnects (optional)
+	ClientGoneCh chan<- string
+
+	// Rewrite the index template (optional)
+	IndexRewrite func(string) string
+
+	// Favicon specifies a custom favicon. Accepts a local file path (e.g.
+	// "/path/to/favicon.png"), an HTTP(S) URL, or a base64 data URI.
+	// A local file path is read at startup, converted to an inline data URI,
+	// and injected into the HTML template. Empty string (default) keeps the
+	// built-in favicon.ico / icon.svg.
+	Favicon string `hcl:"favicon" flagName:"favicon" flagDescribe:"Custom favicon (file path, URL, or data URI)" default:""`
+
+	// Terminal preferences — font, colors, cursor, theme, and palette.
+	// These are sent to the browser on each WebSocket connection.
+	// Users set them in the config file inside a `preferences { ... }` block.
+	Preferences *Preferences `hcl:"preferences"`
+
+	// PingInterval is the interval (in seconds) for WebSocket server-side ping/pong.
+	// The server sends a WebSocket Ping frame every PingInterval seconds.
+	// This keeps the connection alive through NAT/firewall idle timeouts even
+	// when the browser tab is in the background (where JS timers are throttled).
+	// Set to 0 to disable.
+	PingInterval int `hcl:"ping_interval" flagName:"ping-interval" flagSName:"" flagDescribe:"WebSocket server ping interval in seconds (0 to disable)" default:"30"`
+}
+
+// Preferences holds terminal color/font/cursor settings.
+// All fields are optional; nil-pointer fields are omitted when sent to the browser.
+// Users set these in their .gotty config under a `preferences` block.
+type Preferences struct {
+	Theme                 string   `hcl:"theme"`
+	FontSize              int      `hcl:"font_size"`
+	FontFamily            string   `hcl:"font_family"`
+	ForegroundColor       string   `hcl:"foreground_color"`
+	BackgroundColor       string   `hcl:"background_color"`
+	CursorColor           string   `hcl:"cursor_color"`
+	CursorAccent          string   `hcl:"cursor_accent"`
+	SelectionColor        string   `hcl:"selection_color"`
+	CursorStyle           string   `hcl:"cursor_style"`
+	CursorBlink           bool     `hcl:"cursor_blink"`
+	ScrollbackLines       int      `hcl:"scrollback_lines"`
+	EnableWebGL           bool     `hcl:"enable_webgl"`
+	AltIsMeta             bool     `hcl:"alt_is_meta"`
+	ColorPaletteOverrides []string `hcl:"color_palette_overrides"`
 }
 
 func (options *Options) Validate() error {
