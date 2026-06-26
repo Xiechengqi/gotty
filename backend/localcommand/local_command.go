@@ -32,7 +32,17 @@ type LocalCommand struct {
 func New(command string, argv []string, headers map[string][]string, options ...Option) (*LocalCommand, error) {
 	cmd := exec.Command(command, argv...)
 
-	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
+	// Filter out tmux-related env vars leaked from gotty's parent process.
+	// They mislead clients like Claude Code into thinking they run inside a
+	// tmux session, which breaks clipboard integration and /terminal-setup.
+	filtered := make([]string, 0, len(os.Environ()))
+	for _, e := range os.Environ() {
+		if strings.HasPrefix(e, "TMUX=") || strings.HasPrefix(e, "TMUX_PANE=") {
+			continue
+		}
+		filtered = append(filtered, e)
+	}
+	cmd.Env = append(filtered, "TERM=xterm-256color")
 
 	// Combine headers into key=value pairs to set as env vars
 	// Prefix the headers with "http_" so we don't overwrite any other env vars
