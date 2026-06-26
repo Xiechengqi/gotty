@@ -354,6 +354,39 @@ export class GoTTYXterm {
         this.term.loadAddon(unicode11Addon);
         this.term.unicode.activeVersion = '11';
 
+        // OSC 52: applications (e.g. Claude Code under mouse-tracking) ask the
+        // host terminal to write text to the system clipboard. xterm.js has no
+        // built-in handler for this, so the sequence would otherwise be dropped.
+        // Format: OSC 52 ; Pc ; <base64 | "?" | ""> ST
+        this.term.parser.registerOscHandler(52, (data) => {
+            const sep = data.indexOf(';');
+            if (sep < 0) return true;
+            const payload = data.slice(sep + 1);
+            // "?" is a clipboard-read request; "" clears the clipboard.
+            // Ignore both — read-back leaks data, and we have no legitimate
+            // need to clear the user's clipboard from the PTY.
+            if (payload === '' || payload === '?') return true;
+
+            let text: string;
+            try {
+                const bin = atob(payload);
+                const bytes = new Uint8Array(bin.length);
+                for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+                text = new TextDecoder('utf-8').decode(bytes);
+            } catch {
+                return true;
+            }
+
+            if (navigator.clipboard?.writeText) {
+                navigator.clipboard.writeText(text).catch(() => {
+                    this.fallbackCopyToClipboard(text);
+                });
+            } else {
+                this.fallbackCopyToClipboard(text);
+            }
+            return true;
+        });
+
         this.setPreferences(preferences);
 
         this.fitAddOn = new FitAddon();
