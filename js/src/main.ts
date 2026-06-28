@@ -5,6 +5,7 @@ import { createIdleAlert } from "./idle-alert";
 import { installFaviconAlert } from "./favicon-alert";
 import { VoiceInput } from "./voice-input";
 import { initThemePicker } from "./theme-picker";
+import { initShareManager } from "./share-manager";
 
 // @TODO remove these
 declare var gotty_auth_token: string;
@@ -17,6 +18,7 @@ declare var gotty_enable_asr: boolean;
 declare var gotty_asr_hold_ms: number;
 declare var gotty_asr_hotkey: string;
 declare var gotty_preferences: Record<string, unknown>;
+declare var gotty_share_enabled: boolean;
 
 // Helper function to get cookie value
 function getCookie(name: string): string | null {
@@ -49,6 +51,9 @@ if (elem !== null) {
     var term: GoTTYXterm;
     term = new GoTTYXterm(elem, gotty_preferences);
     initThemePicker(term.term);
+    if (typeof gotty_share_enabled !== 'undefined' && gotty_share_enabled) {
+        initShareManager();
+    }
 
     const subscribeTermActivity = (cb: () => void) => {
         const unsubOutput = term.onOutput(cb);

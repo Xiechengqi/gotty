@@ -332,6 +332,7 @@ func (server *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		"var gotty_leader_select = '" + server.options.LeaderSelect + "';",
 		"var gotty_leader_idle_ms = " + strconv.Itoa(server.options.LeaderIdleMs) + ";",
 		"var gotty_show_terminal_state = " + strconv.FormatBool(server.options.ShowTerminalState) + ";",
+		"var gotty_share_enabled = " + strconv.FormatBool(server.options.ShareEnabled) + ";",
 		"var gotty_preferences = " + string(preferences) + ";",
 	}
 

@@ -82,6 +82,19 @@ type Options struct {
 	// when the browser tab is in the background (where JS timers are throttled).
 	// Set to 0 to disable.
 	PingInterval int `hcl:"ping_interval" flagName:"ping-interval" flagSName:"" flagDescribe:"WebSocket server ping interval in seconds (0 to disable)" default:"30"`
+
+	ShareEnabled                       bool   `hcl:"share_enabled" flagName:"share-enabled" flagDescribe:"Enable Portr share management" default:"false"`
+	ShareServerURL                     string `hcl:"share_server_url" flagName:"share-server-url" flagDescribe:"Portr admin server URL for share creation" default:""`
+	ShareSSHURL                        string `hcl:"share_ssh_url" flagName:"share-ssh-url" flagDescribe:"Portr SSH tunnel server address" default:""`
+	ShareTunnelDomain                  string `hcl:"share_tunnel_domain" flagName:"share-tunnel-domain" flagDescribe:"Public Portr tunnel domain" default:""`
+	ShareSecretKey                     string `hcl:"share_secret_key" flagName:"share-secret-key" flagDescribe:"Portr secret key for share creation" default:""`
+	ShareDefaultTTLSeconds             int    `hcl:"share_default_ttl_seconds" flagName:"share-default-ttl" flagDescribe:"Default share TTL in seconds" default:"3600"`
+	ShareMaxTTLSeconds                 int    `hcl:"share_max_ttl_seconds" flagName:"share-max-ttl" flagDescribe:"Maximum share TTL in seconds" default:"14400"`
+	ShareRegistryFile                  string `hcl:"share_registry_file" flagName:"share-registry-file" flagDescribe:"Path to gotty share history registry" default:"~/.gotty-shares.json"`
+	ShareRestoreActive                 bool   `hcl:"share_restore_active" flagName:"share-restore-active" flagDescribe:"Restore unexpired shares after gotty restarts" default:"false"`
+	ShareMaxActive                     int    `hcl:"share_max_active" flagName:"share-max-active" flagDescribe:"Maximum active shares" default:"3"`
+	ShareManageToken                   string `hcl:"share_manage_token" flagName:"share-manage-token" flagDescribe:"Bearer token for share management API" default:""`
+	ShareInsecureSkipHostKeyValidation bool   `hcl:"share_insecure_skip_host_key_validation" flagName:"share-insecure-skip-host-key-validation" flagDescribe:"Skip Portr SSH host key validation for share tunnels" default:"true"`
 }
 
 // Preferences holds terminal color/font/cursor settings.
@@ -150,6 +163,32 @@ func (options *Options) Validate() error {
 		}
 		if options.ExecTimeoutSec <= 0 {
 			return errors.New("api-exec-timeout must be > 0 when API is enabled")
+		}
+	}
+	if options.ShareEnabled {
+		if options.ShareServerURL == "" {
+			return errors.New("share-server-url is required when share is enabled")
+		}
+		if options.ShareSSHURL == "" {
+			return errors.New("share-ssh-url is required when share is enabled")
+		}
+		if options.ShareTunnelDomain == "" {
+			return errors.New("share-tunnel-domain is required when share is enabled")
+		}
+		if options.ShareSecretKey == "" {
+			return errors.New("share-secret-key is required when share is enabled")
+		}
+		if options.ShareDefaultTTLSeconds <= 0 {
+			return errors.New("share-default-ttl must be > 0 when share is enabled")
+		}
+		if options.ShareMaxTTLSeconds <= 0 {
+			return errors.New("share-max-ttl must be > 0 when share is enabled")
+		}
+		if options.ShareDefaultTTLSeconds > options.ShareMaxTTLSeconds {
+			return errors.New("share-default-ttl must be <= share-max-ttl")
+		}
+		if options.ShareMaxActive <= 0 {
+			return errors.New("share-max-active must be > 0 when share is enabled")
 		}
 	}
 	return nil

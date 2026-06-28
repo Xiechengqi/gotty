@@ -46,6 +46,7 @@ type Server struct {
 	terminalStatus *TerminalStatus
 	broadcastCtrl  *BroadcastController
 	execManager    *ExecManager
+	shareManager   *ShareManager
 }
 
 // New creates a new instance of Server.
@@ -199,6 +200,16 @@ func (server *Server) Run(ctx context.Context, options ...RunOption) error {
 	if !strings.HasSuffix(path, "/") {
 		path = path + "/"
 	}
+
+	if server.options.ShareEnabled {
+		shareManager, err := NewShareManager(cctx, server.options)
+		if err != nil {
+			return errors.Wrapf(err, "failed to initialize share manager")
+		}
+		server.shareManager = shareManager
+		defer shareManager.Close()
+	}
+
 	handlers := server.setupHandlers(cctx, opts.gracefullCtx, cancel, path, counter)
 	srv, err := server.setupHTTPServer(handlers)
 	if err != nil {
@@ -249,6 +260,13 @@ func (server *Server) Run(ctx context.Context, options ...RunOption) error {
 
 		host, port, _ := net.SplitHostPort(listener.Addr().String())
 		log.Printf("HTTP server is listening at: %s", scheme+"://"+net.JoinHostPort(host, port)+path)
+	}
+	if server.shareManager != nil && len(listeners) > 0 {
+		_, port, _ := net.SplitHostPort(listeners[0].Addr().String())
+		server.shareManager.SetDefaultTarget(net.JoinHostPort("localhost", port), path)
+		if server.options.ShareRestoreActive {
+			server.shareManager.RestoreActiveShares()
+		}
 	}
 	if server.options.Address == "0.0.0.0" {
 		_, port, _ := net.SplitHostPort(listeners[0].Addr().String())
@@ -337,6 +355,9 @@ func (server *Server) setupHandlers(ctx context.Context, gracefullCtx context.Co
 	wsMux.Handle("/", siteHandler)
 	wsMux.HandleFunc(pathPrefix+"ws", server.generateHandleWS(ctx, gracefullCtx, cancel, counter))
 	wsMux.HandleFunc(pathPrefix+"asr/ws", server.generateHandleASRWS(ctx, gracefullCtx))
+	if server.options.ShareEnabled {
+		server.registerShareHandlers(wsMux, pathPrefix)
+	}
 
 	// Register API routes
 	if server.options.EnableAPI {

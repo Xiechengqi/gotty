@@ -10,6 +10,7 @@ require (
 	github.com/pkg/errors v0.9.1
 	github.com/urfave/cli/v2 v2.27.7
 	github.com/yudai/hcl v0.0.0-20151013225006-5fa2393b3552
+	golang.org/x/crypto v0.45.0
 )
 
 require (
@@ -18,4 +19,5 @@ require (
 	github.com/hashicorp/go-multierror v1.1.1 // indirect
 	github.com/russross/blackfriday/v2 v2.1.0 // indirect
 	github.com/xrash/smetrics v0.0.0-20250705151800-55b8f293f342 // indirect
+	golang.org/x/sys v0.38.0 // indirect
 )

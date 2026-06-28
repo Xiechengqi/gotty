@@ -422,7 +422,7 @@ export class GoTTYXterm {
         this.clearHistoryBtn.className = "clear-history-btn";
         this.clearHistoryBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M2 5h12M5 5V3h6v2M7 7v6M9 7v6M4 5v9a1 1 0 001 1h6a1 1 0 001-1V5" stroke="rgba(255,255,255,0.7)" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
         this.clearHistoryBtn.title = "Clear history";
-        this.clearHistoryBtn.style.cssText = "position:fixed;top:74px;right:10px;width:28px;height:28px;background:rgba(0,0,0,0.7);color:#fff;padding:0;border-radius:4px;font-size:12px;z-index:1000;cursor:pointer;border:none;display:flex;align-items:center;justify-content:center;";
+        this.clearHistoryBtn.style.cssText = "position:fixed;top:106px;right:10px;width:28px;height:28px;background:rgba(0,0,0,0.7);color:#fff;padding:0;border-radius:4px;font-size:12px;z-index:1000;cursor:pointer;border:none;display:flex;align-items:center;justify-content:center;";
         this.clearHistoryBtn.addEventListener('click', () => {
             this.clearHistory();
         });
@@ -433,7 +433,7 @@ export class GoTTYXterm {
         this.uploadBtn.className = "upload-btn";
         this.uploadBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M8 11V3M8 3L5 6M8 3l3 3M3 13h10" stroke="rgba(255,255,255,0.7)" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
         this.uploadBtn.title = "Upload file";
-        this.uploadBtn.style.cssText = "position:fixed;top:106px;right:10px;width:28px;height:28px;background:rgba(0,0,0,0.7);color:#fff;padding:0;border-radius:4px;font-size:12px;z-index:1000;cursor:pointer;border:none;display:flex;align-items:center;justify-content:center;";
+        this.uploadBtn.style.cssText = "position:fixed;top:138px;right:10px;width:28px;height:28px;background:rgba(0,0,0,0.7);color:#fff;padding:0;border-radius:4px;font-size:12px;z-index:1000;cursor:pointer;border:none;display:flex;align-items:center;justify-content:center;";
         this.uploadBtn.addEventListener('click', () => {
             this.fileInput.click();
         });
@@ -444,7 +444,7 @@ export class GoTTYXterm {
         this.restartBtn.className = "restart-btn";
         this.restartBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M13 6a5 5 0 10-1.46 3.54M13 6V2.5M13 6H9.5" stroke="rgba(255,255,255,0.7)" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
         this.restartBtn.title = "Restart";
-        this.restartBtn.style.cssText = "position:fixed;top:138px;right:10px;width:28px;height:28px;background:rgba(0,0,0,0.7);color:#fff;padding:0;border-radius:4px;font-size:12px;z-index:1000;cursor:pointer;border:none;display:flex;align-items:center;justify-content:center;";
+        this.restartBtn.style.cssText = "position:fixed;top:170px;right:10px;width:28px;height:28px;background:rgba(0,0,0,0.7);color:#fff;padding:0;border-radius:4px;font-size:12px;z-index:1000;cursor:pointer;border:none;display:flex;align-items:center;justify-content:center;";
         this.restartBtn.addEventListener('click', () => {
             this.restartProcess();
         });
@@ -466,7 +466,7 @@ export class GoTTYXterm {
         if (this.showTerminalStateOverlay) {
             this.terminalStateElem = elem.ownerDocument.createElement("div");
             this.terminalStateElem.className = "terminal-state";
-            this.terminalStateElem.style.cssText = "position:fixed;top:170px;right:10px;background:rgba(0,0,0,0.7);color:#fff;padding:4px 8px;border-radius:4px;font-size:11px;z-index:1000;";
+            this.terminalStateElem.style.cssText = "position:fixed;top:202px;right:10px;background:rgba(0,0,0,0.7);color:#fff;padding:4px 8px;border-radius:4px;font-size:11px;z-index:1000;";
             this.terminalStateElem.textContent = "Size policy: --";
             elem.appendChild(this.terminalStateElem);
         }
