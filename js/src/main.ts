@@ -51,9 +51,7 @@ if (elem !== null) {
     var term: GoTTYXterm;
     term = new GoTTYXterm(elem, gotty_preferences);
     initThemePicker(term.term);
-    if (typeof gotty_share_enabled !== 'undefined' && gotty_share_enabled) {
-        initShareManager();
-    }
+    initShareManager();
 
     const subscribeTermActivity = (cb: () => void) => {
         const unsubOutput = term.onOutput(cb);

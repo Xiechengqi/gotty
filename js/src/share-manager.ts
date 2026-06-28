@@ -225,12 +225,9 @@ function installShareStyles(): void {
 }
 
 export function initShareManager(): void {
-    if (typeof gotty_share_enabled === "undefined" || !gotty_share_enabled) {
-        return;
-    }
-
     installShareStyles();
 
+    const enabled = typeof gotty_share_enabled !== "undefined" && gotty_share_enabled;
     const container = document.createElement("div");
     container.id = "gotty-share-panel";
     const panel = document.createElement("div");
@@ -486,8 +483,23 @@ export function initShareManager(): void {
         }
     };
 
+    const renderDisabled = () => {
+        panel.innerHTML = "";
+        addTitle("Share");
+        const status = document.createElement("div");
+        status.className = "share-status";
+        status.textContent = "Share management is not enabled. Start gotty with --share-enabled and Portr settings to configure sharing.";
+        panel.appendChild(status);
+    };
+
     const openPanel = () => {
         container.classList.add("open");
+        if (!enabled) {
+            renderDisabled();
+            return;
+        }
+        statusMessage = "Loading shares...";
+        render();
         refresh().catch((err) => {
             statusMessage = err instanceof Error ? err.message : "Failed to load shares";
             render();
@@ -521,12 +533,16 @@ export function initShareManager(): void {
 
     document.body.appendChild(container);
 
-    refresh().catch((err) => {
-        statusMessage = err instanceof Error ? err.message : "Failed to load shares";
-        render();
-    });
+    if (enabled) {
+        refresh().catch((err) => {
+            statusMessage = err instanceof Error ? err.message : "Failed to load shares";
+            render();
+        });
+    } else {
+        renderDisabled();
+    }
     setInterval(() => {
-        if (container.classList.contains("open")) {
+        if (enabled && container.classList.contains("open")) {
             refresh().catch(() => undefined);
         }
     }, 10000);
