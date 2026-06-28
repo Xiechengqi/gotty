@@ -19,6 +19,8 @@ interface ShareListResponse {
     shares: ShareRecord[];
     default_target: string;
     enabled: boolean;
+    configured?: boolean;
+    missing_config?: string[];
 }
 
 const TTL_OPTIONS = [
@@ -238,6 +240,8 @@ export function initShareManager(): void {
     let defaultTarget = "";
     let loading = false;
     let statusMessage = "";
+    let shareConfigured = false;
+    let missingConfig: string[] = [];
 
     const requestJSON = async (path: string, init?: RequestInit) => {
         const res = await fetch(shareAPI(path), {
@@ -258,6 +262,13 @@ export function initShareManager(): void {
         const data = await requestJSON("/-/shares") as ShareListResponse;
         shares = data.shares || [];
         defaultTarget = data.default_target || defaultTarget;
+        shareConfigured = !!data.configured;
+        missingConfig = data.missing_config || [];
+        if (!shareConfigured) {
+            statusMessage = `Portr settings incomplete: ${missingConfig.join(", ")}`;
+        } else if (statusMessage.startsWith("Portr settings incomplete:")) {
+            statusMessage = "";
+        }
         render();
     };
 
@@ -408,8 +419,8 @@ export function initShareManager(): void {
         const quick = document.createElement("button");
         quick.type = "button";
         quick.className = "share-primary";
-        quick.textContent = "Share this terminal";
-        quick.disabled = loading || !defaultTarget;
+        quick.textContent = shareConfigured ? "Share this terminal" : "Configure Portr first";
+        quick.disabled = loading || !defaultTarget || !shareConfigured;
         quick.addEventListener("click", () => createShare("", "http", Number(ttlSelect.value)));
         form.appendChild(quick);
 
@@ -444,8 +455,8 @@ export function initShareManager(): void {
         const create = document.createElement("button");
         create.type = "button";
         create.className = "share-primary";
-        create.textContent = loading ? "Working..." : "Create share";
-        create.disabled = loading;
+        create.textContent = loading ? "Working..." : (shareConfigured ? "Create share" : "Configure Portr first");
+        create.disabled = loading || !shareConfigured;
         create.addEventListener("click", () => createShare(target.value, typeSelect.value, Number(ttlSelect.value)));
         form.appendChild(create);
 

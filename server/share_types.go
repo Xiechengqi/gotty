@@ -40,4 +40,6 @@ type shareListResponse struct {
 	Shares        []ShareRecord `json:"shares"`
 	DefaultTarget string        `json:"default_target"`
 	Enabled       bool          `json:"enabled"`
+	Configured    bool          `json:"configured"`
+	MissingConfig []string      `json:"missing_config,omitempty"`
 }

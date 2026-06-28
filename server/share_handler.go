@@ -69,10 +69,13 @@ func (server *Server) handleShareList(w http.ResponseWriter, r *http.Request) {
 		writeShareError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "GET required")
 		return
 	}
+	missing := server.shareManager.missingConfig()
 	writeShareJSON(w, http.StatusOK, shareListResponse{
 		Shares:        server.shareManager.List(),
 		DefaultTarget: server.shareManager.DefaultTarget(),
 		Enabled:       true,
+		Configured:    len(missing) == 0,
+		MissingConfig: missing,
 	})
 }
 

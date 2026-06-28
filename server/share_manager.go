@@ -48,7 +48,7 @@ func NewShareManager(parent context.Context, options *Options) (*ShareManager, e
 	return manager, nil
 }
 
-func (m *ShareManager) validateConfig() error {
+func (m *ShareManager) missingConfig() []string {
 	var missing []string
 	if strings.TrimSpace(m.options.ShareServerURL) == "" {
 		missing = append(missing, "share-server-url")
@@ -62,6 +62,11 @@ func (m *ShareManager) validateConfig() error {
 	if strings.TrimSpace(m.options.ShareSecretKey) == "" {
 		missing = append(missing, "share-secret-key")
 	}
+	return missing
+}
+
+func (m *ShareManager) validateConfig() error {
+	missing := m.missingConfig()
 	if len(missing) > 0 {
 		return fmt.Errorf("Portr share settings are incomplete: %s", strings.Join(missing, ", "))
 	}
