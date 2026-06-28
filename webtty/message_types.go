@@ -19,6 +19,8 @@ const (
 	UploadFile = '7'
 	// Cancel ongoing file upload
 	UploadCancel = '8'
+	// Restart the current PTY slave process
+	Restart = '9'
 )
 
 const (

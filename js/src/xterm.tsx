@@ -319,6 +319,7 @@ export class GoTTYXterm {
     toServer!: (data: string | Uint8Array) => void;
     encoder: TextEncoder;
     sendUploadFile?: (msg: string) => void;
+    sendRestart?: () => void;
     private uploadMaxMessageSize = 1024;
 
     // Drop overlay and upload modal
@@ -440,7 +441,7 @@ export class GoTTYXterm {
         this.restartBtn.title = "Restart";
         this.restartBtn.style.cssText = "position:fixed;top:138px;right:10px;width:28px;height:28px;background:rgba(0,0,0,0.7);color:#fff;padding:0;border-radius:4px;font-size:12px;z-index:1000;cursor:pointer;border:none;display:flex;align-items:center;justify-content:center;";
         this.restartBtn.addEventListener('click', () => {
-            window.location.reload();
+            this.restartProcess();
         });
         elem.appendChild(this.restartBtn);
 
@@ -1007,6 +1008,10 @@ export class GoTTYXterm {
         this.sendUploadFile = sender;
     }
 
+    setRestartSender(sender: () => void) {
+        this.sendRestart = sender;
+    }
+
     setUploadFileBufferSize(size: number) {
         if (Number.isFinite(size) && size > 0) {
             this.uploadMaxMessageSize = size;
@@ -1064,6 +1069,16 @@ export class GoTTYXterm {
         // Clear local terminal display
         this.term.clear();
         this.showMessage("History cleared", 2000);
+    }
+
+    restartProcess(): void {
+        if (!this.sendRestart) {
+            this.showMessage("Restart is not ready", 2000);
+            return;
+        }
+        this.term.clear();
+        this.showMessage("Restarting process...", 3000);
+        this.sendRestart();
     }
 
     close(): void {

@@ -59,6 +59,7 @@ type SessionManager struct {
 	lineHistory *LineBuffer
 	mu          sync.RWMutex
 	ctx         context.Context
+	generation  int64
 
 	resizePolicy     string
 	leaderSelect     string
@@ -128,6 +129,62 @@ func NewSessionManager(ctx context.Context, slave Slave, options *Options) *Sess
 		clientOrder:    make(map[string]int64),
 		clientSizes:    make(map[string]resizeDimensions),
 	}
+}
+
+func (sm *SessionManager) ReplaceSlave(newSlave Slave) (oldSlave Slave, generation int64, cols int, rows int) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	oldSlave = sm.slave
+	sm.slave = newSlave
+	sm.generation++
+	generation = sm.generation
+	cols = sm.activeCols
+	rows = sm.activeRows
+
+	if sm.history != nil {
+		sm.history.Clear()
+	}
+	if sm.lineHistory != nil {
+		sm.lineHistory.Clear()
+	}
+	sm.cleanupUploadLocked()
+
+	return oldSlave, generation, cols, rows
+}
+
+func (sm *SessionManager) Generation() int64 {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	return sm.generation
+}
+
+func (sm *SessionManager) IsGeneration(generation int64) bool {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	return sm.generation == generation
+}
+
+func (sm *SessionManager) CloseSlave() error {
+	sm.mu.RLock()
+	slave := sm.slave
+	sm.mu.RUnlock()
+	if slave == nil {
+		return nil
+	}
+	return slave.Close()
+}
+
+func (sm *SessionManager) cleanupUploadLocked() {
+	if sm.uploadFile != nil {
+		if f, ok := sm.uploadFile.(*os.File); ok {
+			f.Close()
+		}
+	}
+	sm.uploadFile = nil
+	sm.uploadFileName = ""
+	sm.uploadChunks = 0
+	sm.uploadWorkDir = ""
 }
 
 func (sm *SessionManager) InitializeTerminal() error {

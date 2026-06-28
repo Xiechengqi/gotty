@@ -68,6 +68,14 @@ func (lb *LineBuffer) GetLastN(n int) []string {
 	return append([]string(nil), all[len(all)-n:]...)
 }
 
+func (lb *LineBuffer) Clear() {
+	lb.mu.Lock()
+	defer lb.mu.Unlock()
+
+	lb.lines = lb.lines[:0]
+	lb.partial = ""
+}
+
 func (lb *LineBuffer) appendLineLocked(line string) {
 	lb.lines = append(lb.lines, line)
 	if len(lb.lines) > lb.maxLines {

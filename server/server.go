@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sync"
 	"strings"
 	noesctmpl "text/template"
 	"time"
@@ -39,6 +40,7 @@ type Server struct {
 	titleTemplate    *noesctmpl.Template
 	manifestTemplate *template.Template
 	sessionManager   *SessionManager
+	restartMu        sync.Mutex
 
 	// API components
 	terminalStatus *TerminalStatus
@@ -136,9 +138,9 @@ func (server *Server) Run(ctx context.Context, options ...RunOption) error {
 	if err != nil {
 		return errors.Wrapf(err, "failed to create shared terminal")
 	}
-	defer slave.Close()
 
 	server.sessionManager = NewSessionManager(cctx, slave, server.options)
+	defer server.sessionManager.CloseSlave()
 	if err := server.sessionManager.InitializeTerminal(); err != nil {
 		return errors.Wrapf(err, "failed to initialize terminal size")
 	}
@@ -183,7 +185,7 @@ func (server *Server) Run(ctx context.Context, options ...RunOption) error {
 	}
 
 	go server.sessionManager.Run()
-	go server.readSlaveOutput(cctx)
+	go server.readSlaveOutput(cctx, slave, server.sessionManager.Generation())
 
 	counter := newCounter(time.Duration(server.options.Timeout) * time.Second)
 

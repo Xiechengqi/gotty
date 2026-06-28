@@ -6,6 +6,7 @@ export const msgPing = '2';
 export const msgResizeTerminal = '3';
 export const msgSetEncoding = '4';
 export const msgUploadFile = '7';
+export const msgRestart = '9';
 
 export const msgUnknownOutput = '0';
 export const msgOutput = '1';
@@ -202,6 +203,9 @@ export class WebTTY {
                 if ('setUploadFileBufferSize' in this.term) {
                     (this.term as any).setUploadFileBufferSize(this.bufSize);
                 }
+                if ('setRestartSender' in this.term) {
+                    (this.term as any).setRestartSender(() => this.sendRestart());
+                }
 
                 pingTimer = setInterval(() => {
                     this.sendPing()
@@ -331,6 +335,10 @@ export class WebTTY {
         }
         console.log("[Upload] Sending message to server");
         this.connection.send(msg);
+    }
+
+    private sendRestart(): void {
+        this.connection.send(msgRestart);
     }
 
     private sendPing(): void {

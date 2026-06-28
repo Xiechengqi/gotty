@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"log"
 
 	"github.com/gorilla/websocket"
 )
@@ -89,6 +90,10 @@ func (server *Server) handleClientInput(client *Client, message []byte) {
 	case '7': // Upload file
 		if len(message) > 1 {
 			server.sessionManager.HandleFileUpload(message[1:])
+		}
+	case '9': // Restart terminal process
+		if err := server.restartTerminal(); err != nil {
+			log.Printf("failed to restart terminal: %v", err)
 		}
 	}
 }

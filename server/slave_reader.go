@@ -5,15 +5,18 @@ import (
 	"encoding/base64"
 )
 
-func (server *Server) readSlaveOutput(ctx context.Context) {
+func (server *Server) readSlaveOutput(ctx context.Context, slave Slave, generation int64) {
 	buffer := make([]byte, 1024)
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		default:
-			n, err := server.sessionManager.slave.Read(buffer)
+			n, err := slave.Read(buffer)
 			if err != nil {
+				return
+			}
+			if !server.sessionManager.IsGeneration(generation) {
 				return
 			}
 
@@ -38,7 +41,15 @@ func (server *Server) readSlaveOutput(ctx context.Context) {
 				continue
 			}
 
-			server.sessionManager.broadcast <- encoded
+			if !server.sessionManager.IsGeneration(generation) {
+				return
+			}
+
+			select {
+			case server.sessionManager.broadcast <- encoded:
+			case <-ctx.Done():
+				return
+			}
 		}
 	}
 }

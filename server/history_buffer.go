@@ -73,3 +73,11 @@ func (h *HistoryBuffer) GetLastN(n int) [][]byte {
 	}
 	return result
 }
+
+func (h *HistoryBuffer) Clear() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	h.messages = h.messages[:0]
+	h.totalSize = 0
+}
