@@ -83,7 +83,7 @@ type Options struct {
 	// Set to 0 to disable.
 	PingInterval int `hcl:"ping_interval" flagName:"ping-interval" flagSName:"" flagDescribe:"WebSocket server ping interval in seconds (0 to disable)" default:"30"`
 
-	ShareEnabled                       bool   `hcl:"share_enabled" flagName:"share-enabled" flagDescribe:"Enable Portr share management" default:"false"`
+	ShareEnabled                       bool   `hcl:"share_enabled" flagName:"share-enabled" flagDescribe:"Enable Portr share management" default:"true"`
 	ShareServerURL                     string `hcl:"share_server_url" flagName:"share-server-url" flagDescribe:"Portr admin server URL for share creation" default:""`
 	ShareSSHURL                        string `hcl:"share_ssh_url" flagName:"share-ssh-url" flagDescribe:"Portr SSH tunnel server address" default:""`
 	ShareTunnelDomain                  string `hcl:"share_tunnel_domain" flagName:"share-tunnel-domain" flagDescribe:"Public Portr tunnel domain" default:""`
@@ -166,18 +166,6 @@ func (options *Options) Validate() error {
 		}
 	}
 	if options.ShareEnabled {
-		if options.ShareServerURL == "" {
-			return errors.New("share-server-url is required when share is enabled")
-		}
-		if options.ShareSSHURL == "" {
-			return errors.New("share-ssh-url is required when share is enabled")
-		}
-		if options.ShareTunnelDomain == "" {
-			return errors.New("share-tunnel-domain is required when share is enabled")
-		}
-		if options.ShareSecretKey == "" {
-			return errors.New("share-secret-key is required when share is enabled")
-		}
 		if options.ShareDefaultTTLSeconds <= 0 {
 			return errors.New("share-default-ttl must be > 0 when share is enabled")
 		}

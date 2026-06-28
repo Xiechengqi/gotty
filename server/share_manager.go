@@ -48,6 +48,26 @@ func NewShareManager(parent context.Context, options *Options) (*ShareManager, e
 	return manager, nil
 }
 
+func (m *ShareManager) validateConfig() error {
+	var missing []string
+	if strings.TrimSpace(m.options.ShareServerURL) == "" {
+		missing = append(missing, "share-server-url")
+	}
+	if strings.TrimSpace(m.options.ShareSSHURL) == "" {
+		missing = append(missing, "share-ssh-url")
+	}
+	if strings.TrimSpace(m.options.ShareTunnelDomain) == "" {
+		missing = append(missing, "share-tunnel-domain")
+	}
+	if strings.TrimSpace(m.options.ShareSecretKey) == "" {
+		missing = append(missing, "share-secret-key")
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("Portr share settings are incomplete: %s", strings.Join(missing, ", "))
+	}
+	return nil
+}
+
 func (m *ShareManager) Close() {
 	m.cancel()
 	m.mu.Lock()
@@ -108,6 +128,9 @@ func (m *ShareManager) CreateShare(req shareCreateRequest) (ShareRecord, error) 
 	}
 	if shareType != ShareTypeHTTP && shareType != ShareTypeTCP {
 		return ShareRecord{}, fmt.Errorf("share type must be http or tcp")
+	}
+	if err := m.validateConfig(); err != nil {
+		return ShareRecord{}, err
 	}
 
 	isTerminal := strings.TrimSpace(req.Target) == ""
