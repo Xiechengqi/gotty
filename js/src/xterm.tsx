@@ -17,6 +17,9 @@ const MSG_UPLOAD_CANCEL = '8';
 
 // 文件上传配置
 const PREFERRED_CHUNK_SIZE = 8 * 1024; // 8KB per chunk
+const COPY_SUCCESS_MESSAGE = "Copied to clipboard";
+const COPY_SUCCESS_TIMEOUT_MS = 1400;
+const COPY_SUCCESS_MIN_INTERVAL_MS = 1200;
 
 interface UploadFileMessage {
     name: string;
@@ -334,6 +337,8 @@ export class GoTTYXterm {
     private connectTime: number = 0;
     private selectionCallbacks: Set<() => void> = new Set();
     private uploadCallbacks: Set<(fileName: string, progress: number) => void> = new Set();
+    private lastCopyNotificationText: string = "";
+    private lastCopyNotificationAt: number = 0;
     altIsMeta: boolean = false;
 
     constructor(elem: HTMLElement, preferences: Record<string, unknown> = {}) {
@@ -485,16 +490,23 @@ export class GoTTYXterm {
                 // Try modern Clipboard API first
                 if (navigator.clipboard && navigator.clipboard.writeText) {
                     navigator.clipboard.writeText(text).then(() => {
+                        this.showCopySuccessMessage(text);
                         // Keep focus on terminal after copying
                         this.term.focus();
                     }).catch(err => {
                         console.warn('Clipboard API failed, trying fallback:', err);
-                        this.fallbackCopyToClipboard(text);
+                        if (this.fallbackCopyToClipboard(text)) {
+                            this.showCopySuccessMessage(text);
+                        }
                     });
                 } else {
                     // Fallback for non-secure contexts
-                    this.fallbackCopyToClipboard(text);
+                    if (this.fallbackCopyToClipboard(text)) {
+                        this.showCopySuccessMessage(text);
+                    }
                 }
+            } else {
+                this.lastCopyNotificationText = "";
             }
         });
 
@@ -1111,7 +1123,22 @@ export class GoTTYXterm {
         this.term.focus();
     }
 
-    fallbackCopyToClipboard(text: string): void {
+    private showCopySuccessMessage(text: string): void {
+        if (!text || text === this.lastCopyNotificationText) {
+            return;
+        }
+
+        const now = Date.now();
+        if (now - this.lastCopyNotificationAt < COPY_SUCCESS_MIN_INTERVAL_MS) {
+            return;
+        }
+
+        this.lastCopyNotificationText = text;
+        this.lastCopyNotificationAt = now;
+        this.showMessage(COPY_SUCCESS_MESSAGE, COPY_SUCCESS_TIMEOUT_MS);
+    }
+
+    fallbackCopyToClipboard(text: string): boolean {
         const textarea = document.createElement('textarea');
         textarea.value = text;
         textarea.style.position = 'fixed';
@@ -1119,8 +1146,9 @@ export class GoTTYXterm {
         document.body.appendChild(textarea);
         textarea.select();
 
+        let copied = false;
         try {
-            document.execCommand('copy');
+            copied = document.execCommand('copy');
         } catch (err) {
             console.warn('Fallback copy failed:', err);
         }
@@ -1129,6 +1157,7 @@ export class GoTTYXterm {
 
         // Restore focus to terminal
         this.term.focus();
+        return copied;
     }
 }
 
