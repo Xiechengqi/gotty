@@ -27,6 +27,14 @@ const TTL_OPTIONS = [
     { label: "4 hours", value: 14400 },
 ];
 
+const SHARE_TOOLBAR_OFFSET = 32;
+const TOOLBAR_BASE_TOPS = [
+    { selector: ".clear-history-btn", top: 74 },
+    { selector: ".upload-btn", top: 106 },
+    { selector: ".restart-btn", top: 138 },
+    { selector: ".terminal-state", top: 170 },
+];
+
 function basePath(): string {
     return window.location.pathname.endsWith("/") ? window.location.pathname : window.location.pathname + "/";
 }
@@ -57,6 +65,16 @@ function relativeTime(value: string): string {
 
 function shareIcon(): string {
     return '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M10.5 3.5L12.5 5.5L10.5 7.5M12.5 5.5H7.5A4 4 0 003.5 9.5V12.5M5.5 5.5H3.5V13.5H11.5V11.5" stroke="rgba(255,255,255,0.7)" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+}
+
+function setToolbarShareSlot(enabled: boolean): void {
+    const offset = enabled ? SHARE_TOOLBAR_OFFSET : 0;
+    for (const item of TOOLBAR_BASE_TOPS) {
+        const element = document.querySelector<HTMLElement>(item.selector);
+        if (element) {
+            element.style.top = `${item.top + offset}px`;
+        }
+    }
 }
 
 function installShareStyles(): void {
@@ -255,6 +273,7 @@ export function initShareManager(): void {
     }
 
     installShareStyles();
+    setToolbarShareSlot(true);
 
     const btn = document.createElement("button");
     btn.id = "gotty-share-btn";
@@ -518,17 +537,39 @@ export function initShareManager(): void {
         }
     };
 
-    btn.addEventListener("click", (event) => {
-        event.stopPropagation();
-        container.classList.toggle("open");
+    const openPanel = () => {
+        container.classList.add("open");
         refresh().catch((err) => {
             statusMessage = err instanceof Error ? err.message : "Failed to load shares";
             render();
         });
+    };
+
+    const togglePanel = () => {
+        if (container.classList.contains("open")) {
+            container.classList.remove("open");
+            return;
+        }
+        openPanel();
+    };
+
+    btn.addEventListener("click", (event) => {
+        event.stopPropagation();
+        togglePanel();
     });
 
+    const connectionCount = document.querySelector<HTMLElement>(".connection-count");
+    if (connectionCount) {
+        connectionCount.style.cursor = "pointer";
+        connectionCount.addEventListener("click", (event) => {
+            event.stopPropagation();
+            togglePanel();
+        });
+    }
+
     document.addEventListener("click", (event) => {
-        if (!container.contains(event.target as Node) && event.target !== btn) {
+        const target = event.target as Node;
+        if (!container.contains(target) && target !== btn && target !== connectionCount) {
             container.classList.remove("open");
         }
     });
@@ -536,9 +577,9 @@ export function initShareManager(): void {
     document.body.appendChild(btn);
     document.body.appendChild(container);
 
-    refresh().catch(() => {
-        btn.remove();
-        container.remove();
+    refresh().catch((err) => {
+        statusMessage = err instanceof Error ? err.message : "Failed to load shares";
+        render();
     });
     setInterval(() => {
         if (container.classList.contains("open")) {
