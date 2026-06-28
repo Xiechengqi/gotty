@@ -27,14 +27,6 @@ const TTL_OPTIONS = [
     { label: "4 hours", value: 14400 },
 ];
 
-const SHARE_TOOLBAR_OFFSET = 32;
-const TOOLBAR_BASE_TOPS = [
-    { selector: ".clear-history-btn", top: 74 },
-    { selector: ".upload-btn", top: 106 },
-    { selector: ".restart-btn", top: 138 },
-    { selector: ".terminal-state", top: 170 },
-];
-
 function basePath(): string {
     return window.location.pathname.endsWith("/") ? window.location.pathname : window.location.pathname + "/";
 }
@@ -63,49 +55,14 @@ function relativeTime(value: string): string {
     return `${Math.round(abs / 86400000)}d ${suffix}`;
 }
 
-function shareIcon(): string {
-    return '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M10.5 3.5L12.5 5.5L10.5 7.5M12.5 5.5H7.5A4 4 0 003.5 9.5V12.5M5.5 5.5H3.5V13.5H11.5V11.5" stroke="rgba(255,255,255,0.7)" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-}
-
-function setToolbarShareSlot(enabled: boolean): void {
-    const offset = enabled ? SHARE_TOOLBAR_OFFSET : 0;
-    for (const item of TOOLBAR_BASE_TOPS) {
-        const element = document.querySelector<HTMLElement>(item.selector);
-        if (element) {
-            element.style.top = `${item.top + offset}px`;
-        }
-    }
-}
-
 function installShareStyles(): void {
     if (document.getElementById("gotty-share-styles")) return;
     const style = document.createElement("style");
     style.id = "gotty-share-styles";
     style.textContent = `
-#gotty-share-btn {
-    position: fixed;
-    top: 74px;
-    right: 10px;
-    width: 28px;
-    height: 28px;
-    border-radius: 4px;
-    border: none;
-    background: rgba(0,0,0,0.7);
-    color: #fff;
-    padding: 0;
-    cursor: pointer;
-    z-index: 1000;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    line-height: 1;
-}
-#gotty-share-btn:hover {
-    background: rgba(0,0,0,0.75);
-}
 #gotty-share-panel {
     position: fixed;
-    top: 74px;
+    top: 42px;
     right: 46px;
     z-index: 9999;
     display: none;
@@ -273,14 +230,6 @@ export function initShareManager(): void {
     }
 
     installShareStyles();
-    setToolbarShareSlot(true);
-
-    const btn = document.createElement("button");
-    btn.id = "gotty-share-btn";
-    btn.type = "button";
-    btn.innerHTML = shareIcon();
-    btn.title = "Share manager";
-    btn.setAttribute("aria-label", "Share manager");
 
     const container = document.createElement("div");
     container.id = "gotty-share-panel";
@@ -553,14 +502,10 @@ export function initShareManager(): void {
         openPanel();
     };
 
-    btn.addEventListener("click", (event) => {
-        event.stopPropagation();
-        togglePanel();
-    });
-
     const connectionCount = document.querySelector<HTMLElement>(".connection-count");
     if (connectionCount) {
         connectionCount.style.cursor = "pointer";
+        connectionCount.title = "Connections / Share manager";
         connectionCount.addEventListener("click", (event) => {
             event.stopPropagation();
             togglePanel();
@@ -569,12 +514,11 @@ export function initShareManager(): void {
 
     document.addEventListener("click", (event) => {
         const target = event.target as Node;
-        if (!container.contains(target) && target !== btn && target !== connectionCount) {
+        if (!container.contains(target) && !connectionCount?.contains(target)) {
             container.classList.remove("open");
         }
     });
 
-    document.body.appendChild(btn);
     document.body.appendChild(container);
 
     refresh().catch((err) => {
