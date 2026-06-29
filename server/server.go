@@ -41,6 +41,7 @@ type Server struct {
 	manifestTemplate *template.Template
 	sessionManager   *SessionManager
 	restartMu        sync.Mutex
+	selfRestarting   bool
 
 	// API components
 	terminalStatus *TerminalStatus
@@ -353,6 +354,7 @@ func (server *Server) setupHandlers(ctx context.Context, gracefullCtx context.Co
 
 	wsMux := http.NewServeMux()
 	wsMux.Handle("/", siteHandler)
+	wsMux.HandleFunc(pathPrefix+"-/restart", server.generateHandleSelfRestart(cancel))
 	wsMux.HandleFunc(pathPrefix+"ws", server.generateHandleWS(ctx, gracefullCtx, cancel, counter))
 	wsMux.HandleFunc(pathPrefix+"asr/ws", server.generateHandleASRWS(ctx, gracefullCtx))
 	if server.options.ShareEnabled {

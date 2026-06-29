@@ -322,7 +322,7 @@ export class GoTTYXterm {
     toServer!: (data: string | Uint8Array) => void;
     encoder: TextEncoder;
     sendUploadFile?: (msg: string) => void;
-    sendRestart?: () => void;
+    sendRestart?: () => void | Promise<void>;
     private uploadMaxMessageSize = 1024;
 
     // Drop overlay and upload modal
@@ -1020,7 +1020,7 @@ export class GoTTYXterm {
         this.sendUploadFile = sender;
     }
 
-    setRestartSender(sender: () => void) {
+    setRestartSender(sender: () => void | Promise<void>) {
         this.sendRestart = sender;
     }
 
@@ -1089,8 +1089,8 @@ export class GoTTYXterm {
             return;
         }
         this.term.clear();
-        this.showMessage("Restarting process...", 3000);
-        this.sendRestart();
+        this.showMessage("Restarting GoTTY server...", 0);
+        void this.sendRestart();
     }
 
     close(): void {

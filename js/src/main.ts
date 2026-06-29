@@ -28,6 +28,69 @@ function getCookie(name: string): string | null {
     return null;
 }
 
+function waitForServerRestart(term: GoTTYXterm, basePath: string): void {
+    const startedAt = Date.now();
+    let sawServerDown = false;
+
+    const poll = async () => {
+        try {
+            const response = await fetch(`${basePath}config.js?restart=${Date.now()}`, {
+                cache: "no-store",
+                credentials: "same-origin",
+            });
+            if (response.ok && (sawServerDown || Date.now() - startedAt > 1500)) {
+                window.location.reload();
+                return;
+            }
+        } catch (_) {
+            sawServerDown = true;
+        }
+
+        if (Date.now() - startedAt > 60000) {
+            term.showMessage("Restart request was sent, but the server did not come back automatically.", 0);
+            return;
+        }
+        window.setTimeout(poll, 1000);
+    };
+
+    window.setTimeout(poll, 800);
+}
+
+function installServerRestart(term: GoTTYXterm, basePath: string, authToken: string): void {
+    term.setRestartSender(async () => {
+        try {
+            const headers: Record<string, string> = {
+                "X-GoTTY-Action": "restart",
+            };
+            if (authToken) {
+                headers.Authorization = `Bearer ${authToken}`;
+            }
+            const response = await fetch(`${basePath}-/restart`, {
+                method: "POST",
+                credentials: "same-origin",
+                headers,
+            });
+            if (!response.ok) {
+                let message = `HTTP ${response.status}`;
+                try {
+                    const payload = await response.json();
+                    if (payload && typeof payload.message === "string") {
+                        message = payload.message;
+                    }
+                } catch (_) {
+                    // Keep the status-based message.
+                }
+                throw new Error(message);
+            }
+            term.showMessage("Restart request sent. Waiting for GoTTY to come back...", 0);
+            waitForServerRestart(term, basePath);
+        } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            term.showMessage(`Restart failed: ${message}`, 5000);
+        }
+    });
+}
+
 // Get auth token with fallback chain: localStorage -> Cookie -> global variable
 let authToken: string = '';
 try {
@@ -103,6 +166,7 @@ if (elem !== null) {
     const args = window.location.search;
     const factory = new ConnectionFactory(url, protocols);
     const wt = new WebTTY(term, factory, args, authToken);
+    installServerRestart(term, basePath, authToken);
     const closer = wt.open();
 
     let voiceInput: VoiceInput | null = null;

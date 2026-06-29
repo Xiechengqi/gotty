@@ -203,10 +203,6 @@ export class WebTTY {
                 if ('setUploadFileBufferSize' in this.term) {
                     (this.term as any).setUploadFileBufferSize(this.bufSize);
                 }
-                if ('setRestartSender' in this.term) {
-                    (this.term as any).setRestartSender(() => this.sendRestart());
-                }
-
                 pingTimer = setInterval(() => {
                     this.sendPing()
                 }, 30 * 1000);
@@ -335,10 +331,6 @@ export class WebTTY {
         }
         console.log("[Upload] Sending message to server");
         this.connection.send(msg);
-    }
-
-    private sendRestart(): void {
-        this.connection.send(msgRestart);
     }
 
     private sendPing(): void {
