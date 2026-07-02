@@ -1,7 +1,6 @@
 package server
 
 import (
-	"crypto/subtle"
 	"encoding/json"
 	"net"
 	"net/http"
@@ -24,23 +23,7 @@ func (server *Server) wrapShareAuth(next http.Handler) http.Handler {
 			return
 		}
 
-		if token := server.options.ShareManageToken; token != "" {
-			auth := r.Header.Get("Authorization")
-			if strings.HasPrefix(auth, "Bearer ") {
-				provided := strings.TrimPrefix(auth, "Bearer ")
-				if subtle.ConstantTimeCompare([]byte(provided), []byte(token)) == 1 {
-					next.ServeHTTP(w, r)
-					return
-				}
-			}
-		}
-
-		if !server.isPublicShareHost(r.Host) {
-			next.ServeHTTP(w, r)
-			return
-		}
-
-		writeShareError(w, http.StatusForbidden, "FORBIDDEN", "share management is not available from this request")
+		next.ServeHTTP(w, r)
 	})
 }
 

@@ -1,5 +1,4 @@
 declare var gotty_share_enabled: boolean;
-declare var gotty_share_public_host: boolean;
 declare var gotty_share_default_target: string;
 
 type ShareStatus = "creating" | "active" | "expired" | "stopped" | "failed" | "lost";
@@ -252,10 +251,6 @@ function installShareStyles(): void {
 }
 
 export function initShareManager(): void {
-    if (typeof gotty_share_public_host !== "undefined" && gotty_share_public_host) {
-        return;
-    }
-
     installShareStyles();
 
     const enabled = typeof gotty_share_enabled !== "undefined" && gotty_share_enabled;

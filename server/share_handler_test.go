@@ -31,7 +31,7 @@ func TestShareAuthAllowsGottyHostFromRemoteAddress(t *testing.T) {
 	}
 }
 
-func TestShareAuthBlocksPublicTunnelHost(t *testing.T) {
+func TestShareAuthAllowsPublicTunnelHost(t *testing.T) {
 	server := &Server{
 		options: &Options{
 			ShareEnabled:   true,
@@ -50,8 +50,31 @@ func TestShareAuthBlocksPublicTunnelHost(t *testing.T) {
 
 	handler.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusForbidden)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusNoContent, rec.Body.String())
+	}
+}
+
+func TestShareAuthReturnsNotFoundWhenDisabled(t *testing.T) {
+	server := &Server{
+		options: &Options{
+			ShareEnabled:   false,
+			ShareServerURL: "https://httptunnel.top",
+		},
+		shareManager: &ShareManager{},
+	}
+	handler := server.wrapShareAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "https://gotty-demo.httptunnel.top/-/shares", nil)
+	req.Host = "gotty-demo.httptunnel.top"
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusNotFound)
 	}
 }
 
