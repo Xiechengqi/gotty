@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/sorenisanerd/gotty/utils"
 )
 
 func TestShareRegistryMarksActiveRecordsLostOnStartup(t *testing.T) {
@@ -43,30 +45,7 @@ func TestShareRegistryMarksActiveRecordsLostOnStartup(t *testing.T) {
 
 func TestRestartShareRestoresLostRecordInPlace(t *testing.T) {
 	dir := t.TempDir()
-	clientPath := filepath.Join(dir, "http-tunnel-client")
-	script := `#!/usr/bin/env sh
-set -eu
-mkdir -p "$HOME/.http-tunnel"
-case "$1" in
-  connect)
-    printf '%s\n' "$*" > "$HOME/args.txt"
-    printf '%s\n' '{"event":"startup","data":{"public_url":"https://gotty-xtlaat.httptunnel.top","tunnel_id":"tun_restore"}}'
-    while [ ! -f "$HOME/.http-tunnel/disconnect" ]; do sleep 0.05; done
-    ;;
-  disconnect)
-    touch "$HOME/.http-tunnel/disconnect"
-    ;;
-  release|runtime)
-    rm -f "$HOME/.http-tunnel/disconnect"
-    ;;
-  *)
-    exit 1
-    ;;
-esac
-`
-	if err := os.WriteFile(clientPath, []byte(script), 0700); err != nil {
-		t.Fatalf("write fake client: %v", err)
-	}
+	clientPath := writeFakeShareClient(t, dir)
 
 	options := &Options{
 		ShareEnabled:      true,
@@ -128,6 +107,66 @@ esac
 	}
 	if !strings.Contains(string(args), "--target http://localhost:2222") {
 		t.Fatalf("restart did not use current gotty target: %s", args)
+	}
+}
+
+func TestRestoreActiveSharesRestartsLostRecordsInPlace(t *testing.T) {
+	dir := t.TempDir()
+	clientPath := writeFakeShareClient(t, dir)
+	options := &Options{
+		ShareEnabled:      true,
+		ShareServerURL:    "https://httptunnel.top",
+		ShareClientPath:   clientPath,
+		ShareRuntimeDir:   filepath.Join(dir, "runtime"),
+		ShareRegistryFile: filepath.Join(dir, "shares.json"),
+		ShareMaxActive:    3,
+	}
+	manager, err := NewShareManager(context.Background(), options)
+	if err != nil {
+		t.Fatalf("new share manager: %v", err)
+	}
+	defer manager.Close()
+	manager.SetDefaultTarget("localhost:2222", "/")
+
+	lost := ShareRecord{
+		ID:         "sh_auto_restore",
+		Type:       ShareTypeHTTP,
+		Target:     "localhost:2222",
+		Subdomain:  "gotty-auto",
+		PublicURL:  "https://gotty-auto.httptunnel.top",
+		Status:     ShareStatusLost,
+		CreatedAt:  time.Now().UTC().Add(-time.Minute),
+		LastError:  "gotty restarted before this share was stopped",
+		IsTerminal: true,
+	}
+	if err := manager.registry.Upsert(lost); err != nil {
+		t.Fatalf("upsert lost record: %v", err)
+	}
+
+	manager.restoreActiveShares()
+
+	stored, ok := manager.registry.Get(lost.ID)
+	if !ok {
+		t.Fatal("restored record missing from registry")
+	}
+	if stored.ID != lost.ID || stored.Status != ShareStatusActive {
+		t.Fatalf("stored record = id:%q status:%q, want id:%q status:%q", stored.ID, stored.Status, lost.ID, ShareStatusActive)
+	}
+	if stored.LastError != "" {
+		t.Fatalf("restore did not clear last error: %q", stored.LastError)
+	}
+	if len(manager.registry.List()) != 1 {
+		t.Fatalf("restore should not create a duplicate record: %#v", manager.registry.List())
+	}
+}
+
+func TestShareRestoreActiveDefaultEnabled(t *testing.T) {
+	var options Options
+	if err := utils.ApplyDefaultValues(&options); err != nil {
+		t.Fatalf("apply defaults: %v", err)
+	}
+	if !options.ShareRestoreActive {
+		t.Fatal("ShareRestoreActive default should restore shares after gotty restarts")
 	}
 }
 
@@ -274,6 +313,35 @@ func TestParseShareExpiryRejectsInvalidValues(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected ttl_seconds below 60 to fail")
 	}
+}
+
+func writeFakeShareClient(t *testing.T, dir string) string {
+	t.Helper()
+	clientPath := filepath.Join(dir, "http-tunnel-client")
+	script := `#!/usr/bin/env sh
+set -eu
+mkdir -p "$HOME/.http-tunnel"
+case "$1" in
+  connect)
+    printf '%s\n' "$*" > "$HOME/args.txt"
+    printf '%s\n' '{"event":"startup","data":{"public_url":"https://gotty-xtlaat.httptunnel.top","tunnel_id":"tun_restore"}}'
+    while [ ! -f "$HOME/.http-tunnel/disconnect" ]; do sleep 0.05; done
+    ;;
+  disconnect)
+    touch "$HOME/.http-tunnel/disconnect"
+    ;;
+  release|runtime)
+    rm -f "$HOME/.http-tunnel/disconnect"
+    ;;
+  *)
+    exit 1
+    ;;
+esac
+`
+	if err := os.WriteFile(clientPath, []byte(script), 0700); err != nil {
+		t.Fatalf("write fake client: %v", err)
+	}
+	return clientPath
 }
 
 func timePtr(value time.Time) *time.Time {

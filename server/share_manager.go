@@ -229,6 +229,10 @@ func (m *ShareManager) StopShare(id string, status string) (ShareRecord, error) 
 }
 
 func (m *ShareManager) RestartShare(id string) (ShareRecord, error) {
+	return m.restartShare(id, -1)
+}
+
+func (m *ShareManager) restartShare(id string, ttlOverride int) (ShareRecord, error) {
 	record, ok := m.registry.Get(id)
 	if !ok {
 		return ShareRecord{}, fmt.Errorf("share not found")
@@ -245,6 +249,9 @@ func (m *ShareManager) RestartShare(id string) (ShareRecord, error) {
 
 	now := time.Now().UTC()
 	ttlSeconds := record.TTLSeconds
+	if ttlOverride >= 0 {
+		ttlSeconds = ttlOverride
+	}
 	var expiresAt *time.Time
 	if ttlSeconds > 0 {
 		nextExpiresAt := now.Add(time.Duration(ttlSeconds) * time.Second)
@@ -499,12 +506,9 @@ func (m *ShareManager) restoreActiveShares() {
 				continue
 			}
 		}
-		_, _ = m.CreateShare(shareCreateRequest{
-			Type:       ShareTypeHTTP,
-			Target:     restartTarget(record),
-			Subdomain:  record.Subdomain,
-			TTLSeconds: ttl,
-		})
+		if _, err := m.restartShare(record.ID, ttl); err != nil {
+			m.markShareRestartFailed(record.ID, err)
+		}
 	}
 }
 

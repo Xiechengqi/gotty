@@ -90,7 +90,7 @@ type Options struct {
 	ShareClientPath    string `hcl:"share_client_path" flagName:"share-client-path" flagDescribe:"Path to http-tunnel-client; empty uses /usr/local/bin or the embedded release payload" default:""`
 	ShareRuntimeDir    string `hcl:"share_runtime_dir" flagName:"share-runtime-dir" flagDescribe:"Directory for HTTP tunnel client runtime files" default:"~/.gotty-http-tunnel"`
 	ShareRegistryFile  string `hcl:"share_registry_file" flagName:"share-registry-file" flagDescribe:"Path to gotty share history registry" default:"~/.gotty-shares.json"`
-	ShareRestoreActive bool   `hcl:"share_restore_active" flagName:"share-restore-active" flagDescribe:"Restore unexpired shares after gotty restarts" default:"false"`
+	ShareRestoreActive bool   `hcl:"share_restore_active" flagName:"share-restore-active" flagDescribe:"Restore unexpired shares after gotty restarts" default:"true"`
 	ShareMaxActive     int    `hcl:"share_max_active" flagName:"share-max-active" flagDescribe:"Maximum active shares" default:"3"`
 	ShareManageToken   string `hcl:"share_manage_token" flagName:"share-manage-token" flagDescribe:"Bearer token for share management API" default:""`
 
