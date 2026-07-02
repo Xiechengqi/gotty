@@ -106,7 +106,7 @@ func (r *ShareRegistry) MarkStartupState(restore bool) error {
 		if record.Status != ShareStatusActive && record.Status != ShareStatusCreating {
 			continue
 		}
-		if !record.ExpiresAt.IsZero() && !record.ExpiresAt.After(now) {
+		if record.ExpiresAt != nil && !record.ExpiresAt.After(now) {
 			record.Status = ShareStatusExpired
 		} else if !restore {
 			record.Status = ShareStatusLost

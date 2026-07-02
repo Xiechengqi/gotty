@@ -4,12 +4,14 @@ type ShareStatus = "creating" | "active" | "expired" | "stopped" | "failed" | "l
 
 interface ShareRecord {
     id: string;
-    type: "http" | "tcp";
+    type: "http";
     target: string;
+    subdomain?: string;
     public_url: string;
     status: ShareStatus;
     created_at: string;
-    expires_at: string;
+    expires_at?: string;
+    ttl_seconds?: number;
     stopped_at?: string;
     last_error?: string;
     is_terminal?: boolean;
@@ -21,12 +23,14 @@ interface ShareListResponse {
     enabled: boolean;
     configured?: boolean;
     missing_config?: string[];
+    public_domain?: string;
+    subdomain_prefix?: string;
 }
 
-const TTL_OPTIONS = [
-    { label: "15 min", value: 900 },
-    { label: "1 hour", value: 3600 },
-    { label: "4 hours", value: 14400 },
+const EXPIRY_UNITS = [
+    { label: "Minutes", value: "minutes" },
+    { label: "Hours", value: "hours" },
+    { label: "Days", value: "days" },
 ];
 
 function basePath(): string {
@@ -37,15 +41,17 @@ function shareAPI(path: string): string {
     return basePath() + path.replace(/^\//, "");
 }
 
-function statusClass(status: ShareStatus, expiresAt: string): string {
+function statusClass(status: ShareStatus, expiresAt?: string): string {
     if (status === "active") {
+        if (!expiresAt) return "active";
         const remaining = new Date(expiresAt).getTime() - Date.now();
         return remaining > 0 && remaining < 5 * 60 * 1000 ? "expiring" : "active";
     }
     return status;
 }
 
-function relativeTime(value: string): string {
+function relativeTime(value?: string): string {
+    if (!value) return "Never expires";
     const ts = new Date(value).getTime();
     if (!ts) return "";
     const diff = ts - Date.now();
@@ -55,6 +61,10 @@ function relativeTime(value: string): string {
     if (abs < 60 * 60 * 1000) return `${Math.round(abs / 60000)}m ${suffix}`;
     if (abs < 24 * 60 * 60 * 1000) return `${Math.round(abs / 3600000)}h ${suffix}`;
     return `${Math.round(abs / 86400000)}d ${suffix}`;
+}
+
+function normalizeSuffix(value: string): string {
+    return value.trim().toLowerCase().replace(/^gotty-/, "");
 }
 
 function installShareStyles(): void {
@@ -90,7 +100,7 @@ function installShareStyles(): void {
     background: rgba(30,30,30,0.92);
     backdrop-filter: blur(8px);
     border: 1px solid rgba(255,255,255,0.12);
-    border-radius: 10px;
+    border-radius: 8px;
     padding: 6px;
     box-shadow: 0 8px 24px rgba(0,0,0,0.5);
     color: #ddd;
@@ -129,10 +139,16 @@ function installShareStyles(): void {
     padding: 0 8px;
     box-sizing: border-box;
 }
+#gotty-share-panel input::placeholder {
+    color: rgba(255,255,255,0.35);
+}
 #gotty-share-panel .form-row {
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 6px;
+}
+#gotty-share-panel .expiry-row {
+    grid-template-columns: 1fr 112px;
 }
 #gotty-share-panel .share-primary,
 #gotty-share-panel .share-small {
@@ -153,6 +169,13 @@ function installShareStyles(): void {
 #gotty-share-panel .share-small:disabled {
     opacity: 0.45;
     cursor: default;
+}
+#gotty-share-panel .share-preview {
+    color: rgba(255,255,255,0.42);
+    font-size: 11px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 #gotty-share-panel .share-record {
     display: grid;
@@ -238,10 +261,17 @@ export function initShareManager(): void {
 
     let shares: ShareRecord[] = [];
     let defaultTarget = "";
+    let publicDomain = "httptunnel.top";
+    let subdomainPrefix = "gotty-";
     let loading = false;
     let statusMessage = "";
     let shareConfigured = false;
     let missingConfig: string[] = [];
+    let targetValue = "";
+    let targetTouched = false;
+    let subdomainValue = "";
+    let expireValue = "";
+    let expireUnit = "hours";
 
     const requestJSON = async (path: string, init?: RequestInit) => {
         const res = await fetch(shareAPI(path), {
@@ -262,17 +292,23 @@ export function initShareManager(): void {
         const data = await requestJSON("/-/shares") as ShareListResponse;
         shares = data.shares || [];
         defaultTarget = data.default_target || defaultTarget;
+        publicDomain = data.public_domain || publicDomain;
+        subdomainPrefix = data.subdomain_prefix || subdomainPrefix;
+        if (!targetTouched && defaultTarget) {
+            targetValue = defaultTarget;
+        }
         shareConfigured = !!data.configured;
         missingConfig = data.missing_config || [];
         if (!shareConfigured) {
-            statusMessage = `Portr settings incomplete: ${missingConfig.join(", ")}`;
-        } else if (statusMessage.startsWith("Portr settings incomplete:")) {
+            statusMessage = `HTTP tunnel settings incomplete: ${missingConfig.join(", ")}`;
+        } else if (statusMessage.startsWith("HTTP tunnel settings incomplete:")) {
             statusMessage = "";
         }
         render();
     };
 
     const copyText = async (text: string) => {
+        if (!text) return;
         await navigator.clipboard?.writeText(text);
         statusMessage = "Copied";
         render();
@@ -282,14 +318,31 @@ export function initShareManager(): void {
         }, 1200);
     };
 
-    const createShare = async (target: string, type: string, ttl: number) => {
+    const expiryPayload = () => {
+        const value = expireValue.trim();
+        if (!value) {
+            return { expire_value: 0, expire_unit: "" };
+        }
+        if (!/^[1-9][0-9]*$/.test(value)) {
+            throw new Error("Expiry must be a positive integer");
+        }
+        return { expire_value: Number(value), expire_unit: expireUnit };
+    };
+
+    const createShare = async (target: string) => {
         loading = true;
         statusMessage = "Creating share...";
         render();
         try {
+            const expiry = expiryPayload();
             const record = await requestJSON("/-/share", {
                 method: "POST",
-                body: JSON.stringify({ target, type, ttl_seconds: ttl }),
+                body: JSON.stringify({
+                    target,
+                    type: "http",
+                    subdomain: subdomainValue.trim(),
+                    ...expiry,
+                }),
             }) as ShareRecord;
             statusMessage = "Share created";
             if (record.public_url) {
@@ -306,8 +359,13 @@ export function initShareManager(): void {
     };
 
     const stopShare = async (id: string) => {
-        await requestJSON(`/-/shares/${encodeURIComponent(id)}`, { method: "DELETE" });
-        await refresh();
+        try {
+            await requestJSON(`/-/shares/${encodeURIComponent(id)}`, { method: "DELETE" });
+            await refresh();
+        } catch (err) {
+            statusMessage = err instanceof Error ? err.message : "Failed to stop share";
+            render();
+        }
     };
 
     const restartShare = async (id: string) => {
@@ -328,8 +386,13 @@ export function initShareManager(): void {
     };
 
     const deleteRecord = async (id: string) => {
-        await requestJSON(`/-/shares/${encodeURIComponent(id)}/record`, { method: "DELETE" });
-        await refresh();
+        try {
+            await requestJSON(`/-/shares/${encodeURIComponent(id)}/record`, { method: "DELETE" });
+            await refresh();
+        } catch (err) {
+            statusMessage = err instanceof Error ? err.message : "Failed to delete share";
+            render();
+        }
     };
 
     const addTitle = (text: string) => {
@@ -378,13 +441,10 @@ export function initShareManager(): void {
         const actions = document.createElement("div");
         actions.className = "share-actions";
 
-        const copy = actionButton("Copy", () => copyText(record.public_url));
-        actions.appendChild(copy);
+        actions.appendChild(actionButton("Copy", () => copyText(record.public_url)));
 
         if (record.status === "active") {
-            if (record.public_url.startsWith("http")) {
-                actions.appendChild(actionButton("Open", () => window.open(record.public_url, "_blank", "noopener")));
-            }
+            actions.appendChild(actionButton("Open", () => window.open(record.public_url, "_blank", "noopener")));
             actions.appendChild(actionButton("Stop", () => stopShare(record.id)));
         } else {
             actions.appendChild(actionButton("Restart", () => restartShare(record.id)));
@@ -419,45 +479,77 @@ export function initShareManager(): void {
         const quick = document.createElement("button");
         quick.type = "button";
         quick.className = "share-primary";
-        quick.textContent = shareConfigured ? "Share this terminal" : "Configure Portr first";
+        quick.textContent = shareConfigured ? "Share this terminal" : "Configure HTTP tunnel first";
         quick.disabled = loading || !defaultTarget || !shareConfigured;
-        quick.addEventListener("click", () => createShare("", "http", Number(ttlSelect.value)));
+        quick.addEventListener("click", () => createShare(""));
         form.appendChild(quick);
 
         const target = document.createElement("input");
         target.type = "text";
-        target.placeholder = "host:port";
-        target.value = defaultTarget;
+        target.placeholder = "localhost:8080";
+        target.value = targetValue || defaultTarget;
+        target.setAttribute("aria-label", "Target host and port");
+        target.addEventListener("input", () => {
+            targetTouched = true;
+            targetValue = target.value;
+        });
         form.appendChild(target);
 
-        const row = document.createElement("div");
-        row.className = "form-row";
+        const subdomain = document.createElement("input");
+        subdomain.type = "text";
+        subdomain.placeholder = "subdomain suffix (optional)";
+        subdomain.value = subdomainValue;
+        subdomain.setAttribute("aria-label", "Subdomain suffix");
+        subdomain.addEventListener("input", () => {
+            subdomainValue = subdomain.value;
+        });
+        form.appendChild(subdomain);
 
-        const typeSelect = document.createElement("select");
-        for (const option of [{ label: "HTTP/WebSocket", value: "http" }, { label: "TCP", value: "tcp" }]) {
+        const row = document.createElement("div");
+        row.className = "form-row expiry-row";
+
+        const expiry = document.createElement("input");
+        expiry.type = "number";
+        expiry.min = "1";
+        expiry.step = "1";
+        expiry.placeholder = "Never expires";
+        expiry.value = expireValue;
+        expiry.setAttribute("aria-label", "Expiry value");
+        expiry.addEventListener("input", () => {
+            expireValue = expiry.value;
+        });
+        row.appendChild(expiry);
+
+        const unitSelect = document.createElement("select");
+        unitSelect.setAttribute("aria-label", "Expiry unit");
+        for (const option of EXPIRY_UNITS) {
             const item = document.createElement("option");
             item.value = option.value;
             item.textContent = option.label;
-            typeSelect.appendChild(item);
+            item.selected = option.value === expireUnit;
+            unitSelect.appendChild(item);
         }
-        row.appendChild(typeSelect);
-
-        const ttlSelect = document.createElement("select");
-        for (const option of TTL_OPTIONS) {
-            const item = document.createElement("option");
-            item.value = String(option.value);
-            item.textContent = option.label;
-            ttlSelect.appendChild(item);
-        }
-        row.appendChild(ttlSelect);
+        unitSelect.addEventListener("change", () => {
+            expireUnit = unitSelect.value;
+        });
+        row.appendChild(unitSelect);
         form.appendChild(row);
+
+        const preview = document.createElement("div");
+        preview.className = "share-preview";
+        const suffix = normalizeSuffix(subdomainValue);
+        preview.textContent = suffix
+            ? `https://${subdomainPrefix}${suffix}.${publicDomain}`
+            : `https://${subdomainPrefix}xxxxxx.${publicDomain}`;
+        preview.title = preview.textContent;
+        form.appendChild(preview);
 
         const create = document.createElement("button");
         create.type = "button";
         create.className = "share-primary";
-        create.textContent = loading ? "Working..." : (shareConfigured ? "Create share" : "Configure Portr first");
+        create.textContent = loading ? "Working..." : (shareConfigured ? "Create share" : "Configure HTTP tunnel first");
         create.disabled = loading || !shareConfigured;
-        create.addEventListener("click", () => createShare(target.value, typeSelect.value, Number(ttlSelect.value)));
+        create.addEventListener("click", () => createShare(target.value));
         form.appendChild(create);
 
         panel.appendChild(form);
@@ -499,7 +591,7 @@ export function initShareManager(): void {
         addTitle("Share");
         const status = document.createElement("div");
         status.className = "share-status";
-        status.textContent = "Share management is not enabled. Start gotty with --share-enabled and Portr settings to configure sharing.";
+        status.textContent = "Share management is not enabled. Start gotty with --share-enabled to configure sharing.";
         panel.appendChild(status);
     };
 

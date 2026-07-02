@@ -28,6 +28,9 @@ jobs:
           go-version-file: go.mod
           cache: false
 
+      - name: Embed http-tunnel client for ${{ matrix.arch }}
+        run: ./scripts/prepare-http-tunnel-client.sh ${{ matrix.arch }}
+
       - name: Build gotty binary for ${{ matrix.arch }}
         run: |
           VERSION=$(git describe --tags --always 2>/dev/null || echo "latest")

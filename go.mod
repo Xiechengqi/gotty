@@ -10,7 +10,6 @@ require (
 	github.com/pkg/errors v0.9.1
 	github.com/urfave/cli/v2 v2.27.7
 	github.com/yudai/hcl v0.0.0-20151013225006-5fa2393b3552
-	golang.org/x/crypto v0.45.0
 )
 
 require (

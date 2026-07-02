@@ -21,7 +21,7 @@ func TestShareRegistryMarksActiveRecordsLostOnStartup(t *testing.T) {
 		PublicURL: "https://abc123.example.com",
 		Status:    ShareStatusActive,
 		CreatedAt: time.Now().UTC(),
-		ExpiresAt: time.Now().UTC().Add(time.Hour),
+		ExpiresAt: timePtr(time.Now().UTC().Add(time.Hour)),
 	}
 	if err := registry.Upsert(record); err != nil {
 		t.Fatalf("upsert: %v", err)
@@ -41,10 +41,10 @@ func TestShareRegistryMarksActiveRecordsLostOnStartup(t *testing.T) {
 
 func TestPublicShareDomainHost(t *testing.T) {
 	tests := map[string]string{
-		"portr.dev":              "portr.dev",
-		".portr.dev":             "portr.dev",
-		"https://portr.dev":      "portr.dev",
-		"https://portr.dev:8443": "portr.dev",
+		"httptunnel.top":              "httptunnel.top",
+		".httptunnel.top":             "httptunnel.top",
+		"https://httptunnel.top":      "httptunnel.top",
+		"https://httptunnel.top:8443": "httptunnel.top",
 	}
 	for input, expected := range tests {
 		if got := publicShareDomainHost(input); got != expected {
@@ -65,4 +65,125 @@ func TestValidateShareTargetAllowsLocalhost(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected localhost target to be valid: %v", err)
 	}
+}
+
+func TestNormalizeShareTargetAddsHTTPForHostPort(t *testing.T) {
+	display, targetURL, err := normalizeShareTarget(context.Background(), "localhost:8080")
+	if err != nil {
+		t.Fatalf("normalize target: %v", err)
+	}
+	if display != "localhost:8080" {
+		t.Fatalf("display target = %q", display)
+	}
+	if targetURL != "http://localhost:8080" {
+		t.Fatalf("target URL = %q", targetURL)
+	}
+}
+
+func TestNormalizeShareTargetAllowsHTTPURL(t *testing.T) {
+	display, targetURL, err := normalizeShareTarget(context.Background(), "http://127.0.0.1:8080/base/")
+	if err != nil {
+		t.Fatalf("normalize target: %v", err)
+	}
+	if display != "http://127.0.0.1:8080/base" {
+		t.Fatalf("display target = %q", display)
+	}
+	if targetURL != "http://127.0.0.1:8080/base" {
+		t.Fatalf("target URL = %q", targetURL)
+	}
+}
+
+func TestNormalizeShareSubdomainUsesGottyPrefix(t *testing.T) {
+	suffix, subdomain, err := normalizeShareSubdomain("Demo-1")
+	if err != nil {
+		t.Fatalf("normalize subdomain: %v", err)
+	}
+	if suffix != "demo-1" {
+		t.Fatalf("suffix = %q", suffix)
+	}
+	if subdomain != "gotty-demo-1" {
+		t.Fatalf("subdomain = %q", subdomain)
+	}
+}
+
+func TestNormalizeShareSubdomainAvoidsDoublePrefix(t *testing.T) {
+	_, subdomain, err := normalizeShareSubdomain("gotty-demo")
+	if err != nil {
+		t.Fatalf("normalize subdomain: %v", err)
+	}
+	if subdomain != "gotty-demo" {
+		t.Fatalf("subdomain = %q", subdomain)
+	}
+}
+
+func TestNormalizeShareSubdomainBlankGeneratesSixLetters(t *testing.T) {
+	suffix, subdomain, err := normalizeShareSubdomain("")
+	if err != nil {
+		t.Fatalf("normalize subdomain: %v", err)
+	}
+	if len(suffix) != 6 || subdomain != "gotty-"+suffix {
+		t.Fatalf("suffix=%q subdomain=%q", suffix, subdomain)
+	}
+	for _, ch := range suffix {
+		if ch < 'a' || ch > 'z' {
+			t.Fatalf("generated suffix contains non-letter: %q", suffix)
+		}
+	}
+}
+
+func TestParseShareExpiryBlankMeansNever(t *testing.T) {
+	ttl, expiresAt, err := parseShareExpiry(shareCreateRequest{}, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("parse expiry: %v", err)
+	}
+	if ttl != 0 || expiresAt != nil {
+		t.Fatalf("ttl=%d expiresAt=%v", ttl, expiresAt)
+	}
+}
+
+func TestParseShareExpiryMinutesHoursDays(t *testing.T) {
+	now := time.Now().UTC()
+	tests := []struct {
+		value int
+		unit  string
+		want  int
+	}{
+		{1, "minutes", 60},
+		{2, "hours", 7200},
+		{3, "days", 259200},
+	}
+	for _, tt := range tests {
+		ttl, expiresAt, err := parseShareExpiry(shareCreateRequest{
+			ExpireValue: tt.value,
+			ExpireUnit:  tt.unit,
+		}, now)
+		if err != nil {
+			t.Fatalf("parse expiry %v: %v", tt, err)
+		}
+		if ttl != tt.want {
+			t.Fatalf("ttl = %d, want %d", ttl, tt.want)
+		}
+		if expiresAt == nil || !expiresAt.Equal(now.Add(time.Duration(tt.want)*time.Second)) {
+			t.Fatalf("expiresAt = %v", expiresAt)
+		}
+	}
+}
+
+func TestParseShareExpiryRejectsInvalidValues(t *testing.T) {
+	_, _, err := parseShareExpiry(shareCreateRequest{ExpireValue: 0, ExpireUnit: "hours"}, time.Now().UTC())
+	if err == nil {
+		t.Fatal("expected blank value with unit to fail")
+	}
+	_, _, err = parseShareExpiry(shareCreateRequest{ExpireValue: 1, ExpireUnit: "weeks"}, time.Now().UTC())
+	if err == nil {
+		t.Fatal("expected bad unit to fail")
+	}
+	_, _, err = parseShareExpiry(shareCreateRequest{TTLSeconds: 59}, time.Now().UTC())
+	if err == nil {
+		t.Fatal("expected ttl_seconds below 60 to fail")
+	}
+}
+
+func timePtr(value time.Time) *time.Time {
+	return &value
 }

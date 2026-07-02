@@ -47,10 +47,10 @@ type Options struct {
 	IdleAlertTimeout    int    `hcl:"idle_alert_timeout" flagName:"idle-alert-timeout" flagDescribe:"Idle alert timeout in seconds" default:"30"`
 	Quiet               bool   `hcl:"quiet" flagName:"quiet" flagDescribe:"Don't log" default:"false"`
 
-	EnableAPI      bool   `hcl:"enable_api" flagName:"enable-api" flagDescribe:"Enable REST API for terminal control" default:"false"`
-	ProbeTimeoutMs int    `hcl:"probe_timeout_ms" flagName:"api-probe-timeout" flagDescribe:"Shell probe timeout in milliseconds" default:"500"`
-	UserIdleMs     int    `hcl:"user_idle_ms" flagName:"api-user-idle-ms" flagDescribe:"User idle timeout in milliseconds for API lock" default:"2000"`
-	ExecTimeoutSec int    `hcl:"exec_timeout_sec" flagName:"api-exec-timeout" flagDescribe:"Default API command execution timeout in seconds" default:"30"`
+	EnableAPI      bool `hcl:"enable_api" flagName:"enable-api" flagDescribe:"Enable REST API for terminal control" default:"false"`
+	ProbeTimeoutMs int  `hcl:"probe_timeout_ms" flagName:"api-probe-timeout" flagDescribe:"Shell probe timeout in milliseconds" default:"500"`
+	UserIdleMs     int  `hcl:"user_idle_ms" flagName:"api-user-idle-ms" flagDescribe:"User idle timeout in milliseconds for API lock" default:"2000"`
+	ExecTimeoutSec int  `hcl:"exec_timeout_sec" flagName:"api-exec-timeout" flagDescribe:"Default API command execution timeout in seconds" default:"30"`
 
 	EnableASR  bool   `hcl:"enable_asr" flagName:"enable-asr" flagDescribe:"Enable voice input UI and ASR proxy endpoint" default:"false"`
 	ASRBackend string `hcl:"asr_backend" flagName:"asr-backend" flagDescribe:"WebSocket address of sherpa-onnx streaming_server (e.g. ws://127.0.0.1:6006)" default:"ws://127.0.0.1:6006"`
@@ -84,18 +84,23 @@ type Options struct {
 	// Set to 0 to disable.
 	PingInterval int `hcl:"ping_interval" flagName:"ping-interval" flagSName:"" flagDescribe:"WebSocket server ping interval in seconds (0 to disable)" default:"30"`
 
-	ShareEnabled                       bool   `hcl:"share_enabled" flagName:"share-enabled" flagDescribe:"Enable Portr share management" default:"true"`
-	ShareServerURL                     string `hcl:"share_server_url" flagName:"share-server-url" flagDescribe:"Portr admin server URL for share creation" default:""`
-	ShareSSHURL                        string `hcl:"share_ssh_url" flagName:"share-ssh-url" flagDescribe:"Portr SSH tunnel server address" default:""`
-	ShareTunnelDomain                  string `hcl:"share_tunnel_domain" flagName:"share-tunnel-domain" flagDescribe:"Public Portr tunnel domain" default:""`
-	ShareSecretKey                     string `hcl:"share_secret_key" flagName:"share-secret-key" flagDescribe:"Portr secret key for share creation" default:""`
-	ShareDefaultTTLSeconds             int    `hcl:"share_default_ttl_seconds" flagName:"share-default-ttl" flagDescribe:"Default share TTL in seconds" default:"3600"`
-	ShareMaxTTLSeconds                 int    `hcl:"share_max_ttl_seconds" flagName:"share-max-ttl" flagDescribe:"Maximum share TTL in seconds" default:"14400"`
-	ShareRegistryFile                  string `hcl:"share_registry_file" flagName:"share-registry-file" flagDescribe:"Path to gotty share history registry" default:"~/.gotty-shares.json"`
-	ShareRestoreActive                 bool   `hcl:"share_restore_active" flagName:"share-restore-active" flagDescribe:"Restore unexpired shares after gotty restarts" default:"false"`
-	ShareMaxActive                     int    `hcl:"share_max_active" flagName:"share-max-active" flagDescribe:"Maximum active shares" default:"3"`
-	ShareManageToken                   string `hcl:"share_manage_token" flagName:"share-manage-token" flagDescribe:"Bearer token for share management API" default:""`
-	ShareInsecureSkipHostKeyValidation bool   `hcl:"share_insecure_skip_host_key_validation" flagName:"share-insecure-skip-host-key-validation" flagDescribe:"Skip Portr SSH host key validation for share tunnels" default:"true"`
+	ShareEnabled       bool   `hcl:"share_enabled" flagName:"share-enabled" flagDescribe:"Enable HTTP tunnel share management" default:"true"`
+	ShareServerURL     string `hcl:"share_server_url" flagName:"share-server-url" flagDescribe:"HTTP tunnel server URL" default:"https://httptunnel.top"`
+	ShareCreateToken   string `hcl:"share_create_token" flagName:"share-create-token" flagDescribe:"Optional HTTP tunnel creation bearer token" default:""`
+	ShareClientPath    string `hcl:"share_client_path" flagName:"share-client-path" flagDescribe:"Path to http-tunnel-client; empty uses /usr/local/bin or the embedded release payload" default:""`
+	ShareRuntimeDir    string `hcl:"share_runtime_dir" flagName:"share-runtime-dir" flagDescribe:"Directory for HTTP tunnel client runtime files" default:"~/.gotty-http-tunnel"`
+	ShareRegistryFile  string `hcl:"share_registry_file" flagName:"share-registry-file" flagDescribe:"Path to gotty share history registry" default:"~/.gotty-shares.json"`
+	ShareRestoreActive bool   `hcl:"share_restore_active" flagName:"share-restore-active" flagDescribe:"Restore unexpired shares after gotty restarts" default:"false"`
+	ShareMaxActive     int    `hcl:"share_max_active" flagName:"share-max-active" flagDescribe:"Maximum active shares" default:"3"`
+	ShareManageToken   string `hcl:"share_manage_token" flagName:"share-manage-token" flagDescribe:"Bearer token for share management API" default:""`
+
+	// Deprecated share options are kept for config compatibility only.
+	ShareSSHURL                        string `hcl:"share_ssh_url" default:""`
+	ShareTunnelDomain                  string `hcl:"share_tunnel_domain" default:""`
+	ShareSecretKey                     string `hcl:"share_secret_key" default:""`
+	ShareDefaultTTLSeconds             int    `hcl:"share_default_ttl_seconds" default:"0"`
+	ShareMaxTTLSeconds                 int    `hcl:"share_max_ttl_seconds" default:"0"`
+	ShareInsecureSkipHostKeyValidation bool   `hcl:"share_insecure_skip_host_key_validation" default:"true"`
 }
 
 // Preferences holds terminal color/font/cursor settings.
@@ -170,14 +175,8 @@ func (options *Options) Validate() error {
 		}
 	}
 	if options.ShareEnabled {
-		if options.ShareDefaultTTLSeconds <= 0 {
-			return errors.New("share-default-ttl must be > 0 when share is enabled")
-		}
-		if options.ShareMaxTTLSeconds <= 0 {
-			return errors.New("share-max-ttl must be > 0 when share is enabled")
-		}
-		if options.ShareDefaultTTLSeconds > options.ShareMaxTTLSeconds {
-			return errors.New("share-default-ttl must be <= share-max-ttl")
+		if options.ShareServerURL == "" {
+			return errors.New("share-server-url must not be empty when share is enabled")
 		}
 		if options.ShareMaxActive <= 0 {
 			return errors.New("share-max-active must be > 0 when share is enabled")

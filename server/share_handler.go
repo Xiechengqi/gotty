@@ -71,11 +71,13 @@ func (server *Server) handleShareList(w http.ResponseWriter, r *http.Request) {
 	}
 	missing := server.shareManager.missingConfig()
 	writeShareJSON(w, http.StatusOK, shareListResponse{
-		Shares:        server.shareManager.List(),
-		DefaultTarget: server.shareManager.DefaultTarget(),
-		Enabled:       true,
-		Configured:    len(missing) == 0,
-		MissingConfig: missing,
+		Shares:          server.shareManager.List(),
+		DefaultTarget:   server.shareManager.DefaultTarget(),
+		Enabled:         true,
+		Configured:      len(missing) == 0,
+		MissingConfig:   missing,
+		PublicDomain:    server.sharePublicDomainHost(),
+		SubdomainPrefix: shareSubdomainPrefix,
 	})
 }
 
@@ -164,11 +166,18 @@ func (server *Server) isPublicShareHost(host string) bool {
 	if h, _, err := net.SplitHostPort(host); err == nil {
 		host = h
 	}
-	domain := publicShareDomainHost(server.options.ShareTunnelDomain)
+	domain := server.sharePublicDomainHost()
 	if domain == "" {
 		return false
 	}
 	return host == domain || strings.HasSuffix(host, "."+domain)
+}
+
+func (server *Server) sharePublicDomainHost() string {
+	if domain := publicShareDomainHost(server.options.ShareTunnelDomain); domain != "" {
+		return domain
+	}
+	return publicShareDomainHost(server.options.ShareServerURL)
 }
 
 func publicShareDomainHost(domain string) string {

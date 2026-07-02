@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/json"
 	"html/template"
 	"io/fs"
@@ -13,8 +14,8 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"sync"
 	"strings"
+	"sync"
 	noesctmpl "text/template"
 	"time"
 
