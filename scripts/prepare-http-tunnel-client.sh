@@ -1,14 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-arch="${1:-${GOARCH:-}}"
+host_machine="$(uname -m)"
+case "${host_machine}" in
+  x86_64) host_arch="amd64" ;;
+  aarch64|arm64) host_arch="arm64" ;;
+  *) host_arch="" ;;
+esac
+
+arch="${1:-${GOARCH:-${host_arch}}}"
 if [[ -z "${arch}" ]]; then
-  machine="$(uname -m)"
-  case "${machine}" in
-    x86_64) arch="amd64" ;;
-    aarch64|arm64) arch="arm64" ;;
-    *) echo "unsupported architecture: ${machine}" >&2; exit 1 ;;
-  esac
+  echo "unsupported architecture: ${host_machine}" >&2
+  exit 1
 fi
 
 case "${arch}" in
@@ -29,5 +32,12 @@ tmp="${out}.tmp"
 mkdir -p "$(dirname "${out}")"
 curl -fsSL "${url}" -o "${tmp}"
 chmod 0755 "${tmp}"
-"${tmp}" version >/dev/null
+if [[ "${arch}" == "${host_arch}" ]]; then
+  "${tmp}" version >/dev/null
+else
+  if [[ ! -s "${tmp}" ]] || [[ "$(head -c 4 "${tmp}")" != $'\x7fELF' ]]; then
+    echo "downloaded http-tunnel-client for ${arch} is not a valid ELF binary" >&2
+    exit 1
+  fi
+fi
 mv "${tmp}" "${out}"
