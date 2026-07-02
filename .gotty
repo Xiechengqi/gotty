@@ -54,6 +54,10 @@
 //       To enable reconnection, set `true` to `enable_reconnect`
 // reconnect_time = 10
 
+// [int] Bytes of terminal history to replay on refresh/reconnect.
+//       0 means replay all buffered history.
+// history_replay_bytes = 524288
+
 // [int] Timeout seconds for waiting a client (0 to disable)
 // timeout = 60
 

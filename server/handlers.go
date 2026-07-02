@@ -18,6 +18,18 @@ import (
 	"github.com/sorenisanerd/gotty/webtty"
 )
 
+const replayChunkSize = 64 * 1024
+
+type replayBeginPayload struct {
+	Epoch      string `json:"epoch"`
+	Mode       string `json:"mode"`
+	FromOffset int64  `json:"fromOffset"`
+}
+
+type replayEndPayload struct {
+	EndOffset int64 `json:"endOffset"`
+}
+
 func (server *Server) generateHandleWS(ctx context.Context, gracefullCtx context.Context, cancel context.CancelFunc, counter *counter) http.HandlerFunc {
 	once := new(int64)
 
@@ -150,6 +162,7 @@ func (server *Server) processWSConn(ctx context.Context, conn *websocket.Conn, h
 		conn:  conn,
 		send:  make(chan []byte, 256),
 		ready: make(chan struct{}),
+		init:  init,
 	}
 
 	select {
@@ -171,15 +184,8 @@ func (server *Server) processWSConn(ctx context.Context, conn *websocket.Conn, h
 		return ctx.Err()
 	}
 
-	// Send history
-	history := server.sessionManager.history.GetAll()
-	for _, msg := range history {
-		if err := conn.WriteMessage(websocket.TextMessage, msg); err != nil {
-			if ctx.Err() != nil {
-				return ctx.Err()
-			}
-			return err
-		}
+	if err := server.sendReplayMessages(ctx, conn, client.replay); err != nil {
+		return err
 	}
 
 	// Send initial messages
@@ -225,6 +231,62 @@ func (server *Server) processWSConn(ctx context.Context, conn *websocket.Conn, h
 			}
 		}
 	}
+}
+
+func (server *Server) sendReplayMessages(ctx context.Context, conn *websocket.Conn, replay replaySnapshot) error {
+	mode := replay.Mode
+	if mode == "" {
+		mode = "tail"
+	}
+
+	begin, err := json.Marshal(replayBeginPayload{
+		Epoch:      replay.Epoch,
+		Mode:       mode,
+		FromOffset: replay.FromOffset,
+	})
+	if err != nil {
+		return err
+	}
+	if err := conn.WriteMessage(websocket.TextMessage, append([]byte{webtty.ReplayBegin}, begin...)); err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return err
+	}
+
+	if mode == "tail" {
+		if err := conn.WriteMessage(websocket.TextMessage, encodeOutputMessage([]byte("\x1bc"))); err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			return err
+		}
+	}
+
+	for start := 0; start < len(replay.Data); start += replayChunkSize {
+		end := start + replayChunkSize
+		if end > len(replay.Data) {
+			end = len(replay.Data)
+		}
+		if err := conn.WriteMessage(websocket.TextMessage, encodeOutputMessage(replay.Data[start:end])); err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			return err
+		}
+	}
+
+	done, err := json.Marshal(replayEndPayload{EndOffset: replay.EndOffset})
+	if err != nil {
+		return err
+	}
+	if err := conn.WriteMessage(websocket.TextMessage, append([]byte{webtty.ReplayEnd}, done...)); err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return err
+	}
+	return nil
 }
 
 func (server *Server) handleIndex(w http.ResponseWriter, r *http.Request) {

@@ -40,4 +40,8 @@ const (
 	SetBufferSize = '6'
 	// API execution notification
 	APINotification = '9'
+	// Begin replaying buffered terminal output
+	ReplayBegin = 'a'
+	// Finish replaying buffered terminal output
+	ReplayEnd = 'b'
 )

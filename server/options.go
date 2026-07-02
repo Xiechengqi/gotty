@@ -22,6 +22,7 @@ type Options struct {
 	TitleFormat         string `hcl:"title_format" flagName:"title-format" flagSName:"" flagDescribe:"Title format of browser window" default:"{{ .command }}@{{ .hostname }}"`
 	EnableReconnect     bool   `hcl:"enable_reconnect" flagName:"reconnect" flagDescribe:"Enable reconnection" default:"false"`
 	ReconnectTime       int    `hcl:"reconnect_time" flagName:"reconnect-time" flagDescribe:"Time to reconnect" default:"10"`
+	HistoryReplayBytes  int    `hcl:"history_replay_bytes" flagName:"history-replay-bytes" flagDescribe:"Bytes of terminal history to replay on refresh/reconnect (0 for all buffered history)" default:"524288"`
 	MaxConnection       int    `hcl:"max_connection" flagName:"max-connection" flagDescribe:"Maximum connection to gotty" default:"0"`
 	Once                bool   `hcl:"once" flagName:"once" flagDescribe:"Accept only one client and exit on disconnection" default:"false"`
 	Timeout             int    `hcl:"timeout" flagName:"timeout" flagDescribe:"Timeout seconds for waiting a client(0 to disable)" default:"0"`
@@ -126,6 +127,9 @@ func (options *Options) Validate() error {
 	}
 	if options.EnableASR && options.ASRHoldMs < 0 {
 		return errors.New("enable-asr is enabled, but asr-hold-ms must be >= 0")
+	}
+	if options.HistoryReplayBytes < 0 {
+		return errors.New("history-replay-bytes must be >= 0")
 	}
 	switch options.ResizePolicy {
 	case "fixed", "leader", "median":

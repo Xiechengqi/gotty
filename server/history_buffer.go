@@ -1,83 +1,190 @@
 package server
 
-import "sync"
+import (
+	"crypto/rand"
+	"encoding/hex"
+	"fmt"
+	"sync"
+	"time"
+)
+
+type historyChunk struct {
+	startOffset int64
+	data        []byte
+}
 
 type HistoryBuffer struct {
-	messages  [][]byte
-	totalSize int
-	maxSize   int
-	mu        sync.RWMutex
+	chunks     []historyChunk
+	totalSize  int
+	maxSize    int
+	headOffset int64
+	tailOffset int64
+	epoch      string
+	mu         sync.RWMutex
 }
 
 func NewHistoryBuffer(maxSize int) *HistoryBuffer {
 	return &HistoryBuffer{
-		messages:  make([][]byte, 0),
-		totalSize: 0,
-		maxSize:   maxSize,
+		chunks: make([]historyChunk, 0),
+		maxSize: maxSize,
+		epoch:   newHistoryEpoch(),
 	}
 }
 
-func (h *HistoryBuffer) Append(data []byte) {
+func (h *HistoryBuffer) AppendRaw(data []byte) {
+	if len(data) == 0 {
+		return
+	}
+
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	msg := make([]byte, len(data))
-	copy(msg, data)
+	start := h.tailOffset
+	h.tailOffset += int64(len(data))
 
-	h.messages = append(h.messages, msg)
-	h.totalSize += len(msg)
-
-	for h.totalSize > h.maxSize && len(h.messages) > 0 {
-		h.totalSize -= len(h.messages[0])
-		h.messages = h.messages[1:]
+	if h.maxSize <= 0 {
+		h.chunks = h.chunks[:0]
+		h.totalSize = 0
+		h.headOffset = h.tailOffset
+		return
 	}
 
-	// Compact: if we've evicted more than half the capacity, reallocate
-	// to release the unreachable prefix of the underlying array.
-	if cap(h.messages) > 2*len(h.messages) && cap(h.messages) > 64 {
-		compacted := make([][]byte, len(h.messages))
-		copy(compacted, h.messages)
-		h.messages = compacted
+	chunkData := append([]byte(nil), data...)
+	if len(chunkData) > h.maxSize {
+		chunkData = append([]byte(nil), chunkData[len(chunkData)-h.maxSize:]...)
+		start = h.tailOffset - int64(len(chunkData))
 	}
+
+	h.chunks = append(h.chunks, historyChunk{
+		startOffset: start,
+		data:        chunkData,
+	})
+	h.totalSize += len(chunkData)
+	h.evictLocked()
 }
 
-func (h *HistoryBuffer) GetAll() [][]byte {
+func (h *HistoryBuffer) GetSince(offset int64) ([]byte, bool) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 
-	result := make([][]byte, len(h.messages))
-	for i, msg := range h.messages {
-		result[i] = make([]byte, len(msg))
-		copy(result[i], msg)
+	if offset < h.headOffset || offset > h.tailOffset {
+		return nil, false
 	}
-	return result
+	if offset == h.tailOffset {
+		return []byte{}, true
+	}
+	return h.copyRangeLocked(offset, h.tailOffset), true
 }
 
-// GetLastN returns the last n messages from the buffer.
-func (h *HistoryBuffer) GetLastN(n int) [][]byte {
+func (h *HistoryBuffer) GetTail(maxBytes int) ([]byte, int64) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 
-	if n <= 0 {
-		return nil
+	from := h.headOffset
+	if maxBytes > 0 {
+		remaining := maxBytes
+		from = h.tailOffset
+		for i := len(h.chunks) - 1; i >= 0; i-- {
+			chunk := h.chunks[i]
+			chunkSize := len(chunk.data)
+			if chunkSize <= remaining {
+				from = chunk.startOffset
+				remaining -= chunkSize
+				continue
+			}
+			if from == h.tailOffset {
+				from = chunk.startOffset + int64(chunkSize-remaining)
+			}
+			break
+		}
 	}
+	if from > h.tailOffset {
+		from = h.tailOffset
+	}
+	return h.copyRangeLocked(from, h.tailOffset), from
+}
 
-	start := len(h.messages) - n
-	if start < 0 {
-		start = 0
-	}
-	result := make([][]byte, len(h.messages)-start)
-	for i, msg := range h.messages[start:] {
-		result[i] = make([]byte, len(msg))
-		copy(result[i], msg)
-	}
-	return result
+func (h *HistoryBuffer) Offsets() (string, int64, int64) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.epoch, h.headOffset, h.tailOffset
 }
 
 func (h *HistoryBuffer) Clear() {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	h.messages = h.messages[:0]
+	h.chunks = h.chunks[:0]
 	h.totalSize = 0
+	h.headOffset = 0
+	h.tailOffset = 0
+	h.epoch = newHistoryEpoch()
+}
+
+func (h *HistoryBuffer) evictLocked() {
+	for h.totalSize > h.maxSize && len(h.chunks) > 0 {
+		over := h.totalSize - h.maxSize
+		first := &h.chunks[0]
+		if over >= len(first.data) {
+			h.totalSize -= len(first.data)
+			h.headOffset = first.startOffset + int64(len(first.data))
+			h.chunks = h.chunks[1:]
+			continue
+		}
+
+		first.data = append([]byte(nil), first.data[over:]...)
+		first.startOffset += int64(over)
+		h.totalSize -= over
+		h.headOffset = first.startOffset
+		break
+	}
+
+	if len(h.chunks) == 0 {
+		h.headOffset = h.tailOffset
+	}
+
+	if cap(h.chunks) > 2*len(h.chunks) && cap(h.chunks) > 64 {
+		compacted := make([]historyChunk, len(h.chunks))
+		copy(compacted, h.chunks)
+		h.chunks = compacted
+	}
+}
+
+func (h *HistoryBuffer) copyRangeLocked(from, to int64) []byte {
+	if from >= to {
+		return []byte{}
+	}
+
+	result := make([]byte, 0, to-from)
+	for _, chunk := range h.chunks {
+		chunkStart := chunk.startOffset
+		chunkEnd := chunk.startOffset + int64(len(chunk.data))
+		if chunkEnd <= from {
+			continue
+		}
+		if chunkStart >= to {
+			break
+		}
+
+		start := int64(0)
+		if from > chunkStart {
+			start = from - chunkStart
+		}
+		end := int64(len(chunk.data))
+		if to < chunkEnd {
+			end = to - chunkStart
+		}
+		if start < end {
+			result = append(result, chunk.data[start:end]...)
+		}
+	}
+	return result
+}
+
+func newHistoryEpoch() string {
+	var buf [8]byte
+	if _, err := rand.Read(buf[:]); err == nil {
+		return hex.EncodeToString(buf[:])
+	}
+	return fmt.Sprintf("%d", time.Now().UnixNano())
 }

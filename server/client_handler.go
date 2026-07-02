@@ -78,6 +78,8 @@ func (server *Server) handleClientInput(client *Client, message []byte) {
 				}
 			}
 		}
+	case '2': // Ping
+		enqueueClientMessage(client, []byte{'2'})
 	case '3': // Resize
 		if len(message) <= 1 {
 			return
@@ -95,5 +97,18 @@ func (server *Server) handleClientInput(client *Client, message []byte) {
 		if err := server.restartTerminal(); err != nil {
 			log.Printf("failed to restart terminal: %v", err)
 		}
+	}
+}
+
+func enqueueClientMessage(client *Client, message []byte) {
+	if client == nil || client.send == nil {
+		return
+	}
+	defer func() {
+		_ = recover()
+	}()
+	select {
+	case client.send <- message:
+	default:
 	}
 }

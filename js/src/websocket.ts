@@ -39,6 +39,10 @@ export class Connection {
         return false
     }
 
+    readyState(): number {
+        return this.bare.readyState;
+    }
+
     onOpen(callback: () => void) {
         this.bare.onopen = (event) => {
             callback();
@@ -51,9 +55,9 @@ export class Connection {
         }
     };
 
-    onClose(callback: () => void) {
+    onClose(callback: (event: CloseEvent) => void) {
         this.bare.onclose = (event) => {
-            callback();
+            callback(event);
         };
     };
 }

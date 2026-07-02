@@ -347,6 +347,7 @@ random_url_length = 16
 permit_write = true
 enable_reconnect = true
 reconnect_time = 10
+history_replay_bytes = 524288
 max_connection = 10
 
 // 终端设置
@@ -427,6 +428,7 @@ certbot certonly --standalone -d gotty.example.com
 --timeout                   等待客户端超时秒数 (0=禁用)
 --reconnect                 启用重连
 --reconnect-time            重连时间间隔 (默认: 10)
+--history-replay-bytes      刷新/重连时回放的终端历史字节数 (默认: 524288, 0=全部缓冲历史)
 
 # 终端选项
 --width                     静态终端宽度 (0=动态调整)

@@ -22,10 +22,20 @@ const (
 )
 
 type Client struct {
-	id    string
-	conn  *websocket.Conn
-	send  chan []byte
-	ready chan struct{}
+	id     string
+	conn   *websocket.Conn
+	send   chan []byte
+	ready  chan struct{}
+	init   InitMessage
+	replay replaySnapshot
+}
+
+type replaySnapshot struct {
+	Epoch      string
+	Mode       string
+	FromOffset int64
+	EndOffset  int64
+	Data       []byte
 }
 
 type resizeDimensions struct {
@@ -52,7 +62,7 @@ type terminalState struct {
 type SessionManager struct {
 	slave       Slave
 	clients     map[*Client]bool
-	broadcast   chan []byte
+	broadcast   chan broadcastMessage
 	register    chan *Client
 	unregister  chan *Client
 	history     *HistoryBuffer
@@ -69,17 +79,18 @@ type SessionManager struct {
 	maxCols          int
 	minRows          int
 	maxRows          int
-	resizeDebounce   time.Duration
-	configuredCols   int
-	configuredRows   int
-	leaderClientID   string
-	lastResizeAt     time.Time
-	lastResizeSource string
-	activeCols       int
-	activeRows       int
-	nextClientSeq    int64
-	clientOrder      map[string]int64
-	clientSizes      map[string]resizeDimensions
+	resizeDebounce      time.Duration
+	historyReplayBytes int
+	configuredCols      int
+	configuredRows      int
+	leaderClientID      string
+	lastResizeAt        time.Time
+	lastResizeSource    string
+	activeCols          int
+	activeRows          int
+	nextClientSeq       int64
+	clientOrder         map[string]int64
+	clientSizes         map[string]resizeDimensions
 
 	// File upload state
 	uploadFile     interface{}
@@ -107,27 +118,28 @@ func NewSessionManager(ctx context.Context, slave Slave, options *Options) *Sess
 	}
 
 	return &SessionManager{
-		slave:          slave,
-		clients:        make(map[*Client]bool),
-		broadcast:      make(chan []byte, 256),
-		register:       make(chan *Client),
-		unregister:     make(chan *Client),
-		history:        NewHistoryBuffer(10 * 1024 * 1024), // 10MB
-		lineHistory:    NewLineBuffer(5000),
-		ctx:            ctx,
-		resizePolicy:   options.ResizePolicy,
-		leaderSelect:   options.LeaderSelect,
-		leaderSwitch:   options.LeaderSwitch,
-		leaderIdle:     time.Duration(options.LeaderIdleMs) * time.Millisecond,
-		minCols:        options.MinCols,
-		maxCols:        options.MaxCols,
-		minRows:        options.MinRows,
-		maxRows:        options.MaxRows,
-		resizeDebounce: time.Duration(options.ResizeDebounceMs) * time.Millisecond,
-		configuredCols: configuredCols,
-		configuredRows: configuredRows,
-		clientOrder:    make(map[string]int64),
-		clientSizes:    make(map[string]resizeDimensions),
+		slave:              slave,
+		clients:            make(map[*Client]bool),
+		broadcast:          make(chan broadcastMessage, 256),
+		register:           make(chan *Client),
+		unregister:         make(chan *Client),
+		history:            NewHistoryBuffer(10 * 1024 * 1024), // 10MB
+		lineHistory:        NewLineBuffer(5000),
+		ctx:                ctx,
+		resizePolicy:       options.ResizePolicy,
+		leaderSelect:       options.LeaderSelect,
+		leaderSwitch:       options.LeaderSwitch,
+		leaderIdle:         time.Duration(options.LeaderIdleMs) * time.Millisecond,
+		minCols:            options.MinCols,
+		maxCols:            options.MaxCols,
+		minRows:            options.MinRows,
+		maxRows:            options.MaxRows,
+		resizeDebounce:     time.Duration(options.ResizeDebounceMs) * time.Millisecond,
+		historyReplayBytes: options.HistoryReplayBytes,
+		configuredCols:     configuredCols,
+		configuredRows:     configuredRows,
+		clientOrder:        make(map[string]int64),
+		clientSizes:        make(map[string]resizeDimensions),
 	}
 }
 
@@ -231,6 +243,7 @@ func (sm *SessionManager) Run() {
 					sm.leaderClientID = client.id
 				}
 			}
+			client.replay = sm.buildReplaySnapshot(client.init)
 			if client.ready != nil {
 				close(client.ready)
 				client.ready = nil
@@ -268,11 +281,19 @@ func (sm *SessionManager) Run() {
 				sm.reconcileResize("client-disconnect")
 			}
 		case message := <-sm.broadcast:
-			sm.history.Append(message)
+			if sm.isStaleBroadcast(message) {
+				continue
+			}
+			if len(message.raw) > 0 && sm.history != nil {
+				sm.history.AppendRaw(message.raw)
+			}
+			if len(message.wire) == 0 && len(message.raw) > 0 {
+				message.wire = encodeOutputMessage(message.raw)
+			}
 			sm.mu.Lock()
 			for client := range sm.clients {
 				select {
-				case client.send <- message:
+				case client.send <- message.wire:
 				default:
 					close(client.send)
 					delete(sm.clients, client)
@@ -282,6 +303,44 @@ func (sm *SessionManager) Run() {
 			}
 			sm.mu.Unlock()
 		}
+	}
+}
+
+func (sm *SessionManager) isStaleBroadcast(message broadcastMessage) bool {
+	if !message.hasGeneration {
+		return false
+	}
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	return message.generation != sm.generation
+}
+
+func (sm *SessionManager) buildReplaySnapshot(init InitMessage) replaySnapshot {
+	if sm.history == nil {
+		return replaySnapshot{Mode: "tail"}
+	}
+
+	epoch, _, tail := sm.history.Offsets()
+	if init.Epoch != "" && init.Epoch == epoch {
+		if data, ok := sm.history.GetSince(init.LastOffset); ok {
+			return replaySnapshot{
+				Epoch:      epoch,
+				Mode:       "resume",
+				FromOffset: init.LastOffset,
+				EndOffset:  tail,
+				Data:       data,
+			}
+		}
+	}
+
+	data, fromOffset := sm.history.GetTail(sm.historyReplayBytes)
+	epoch, _, tail = sm.history.Offsets()
+	return replaySnapshot{
+		Epoch:      epoch,
+		Mode:       "tail",
+		FromOffset: fromOffset,
+		EndOffset:  tail,
+		Data:       data,
 	}
 }
 

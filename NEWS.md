@@ -10,6 +10,9 @@
 * Add color palette overrides via `preferences { color_palette_overrides = [...] }`.
 * Add cursor style (`block`/`underline`/`bar`), cursor blink, and scrollback lines to preferences.
 * Add Display Customization section to README documenting all new features.
+* Add offset-based reconnect replay so reconnects can resume missed terminal output without replaying the full history buffer.
+* Add default self-healing browser reconnect with visibility/page-cache/network recovery for mobile browsers.
+* Add `--history-replay-bytes` / `history_replay_bytes` to cap refresh replay size; default is 512 KiB and `0` replays all buffered history.
 
 ##  v1.6.0 (2025-08-02)
 

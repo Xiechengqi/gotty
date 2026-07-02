@@ -314,8 +314,8 @@ export class GoTTYXterm {
     private apiIndicatorElem: HTMLElement | null = null;
     private showTerminalStateOverlay: boolean;
 
-    onResizeHandler!: IDisposable;
-    onDataHandler!: IDisposable;
+    onResizeHandler?: IDisposable;
+    onDataHandler?: IDisposable;
 
     fitAddOn: FitAddon;
     zmodemAddon: ZModemAddon;
@@ -1064,8 +1064,10 @@ export class GoTTYXterm {
     };
 
     deactivate(): void {
-        this.onDataHandler.dispose();
-        this.onResizeHandler.dispose();
+        this.onDataHandler?.dispose();
+        this.onResizeHandler?.dispose();
+        this.onDataHandler = undefined;
+        this.onResizeHandler = undefined;
         this.term.blur();
     }
 
@@ -1121,6 +1123,10 @@ export class GoTTYXterm {
 
     focus(): void {
         this.term.focus();
+    }
+
+    scrollToBottom(): void {
+        this.term.scrollToBottom();
     }
 
     private showCopySuccessMessage(text: string): void {

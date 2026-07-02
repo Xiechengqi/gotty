@@ -1,7 +1,6 @@
 package server
 
 import (
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -24,7 +23,7 @@ func (server *Server) restartTerminal() error {
 		}
 	}
 
-	server.rebuildExecManager(newSlave)
+	server.rebuildExecManager(newSlave, generation)
 	go server.readSlaveOutput(server.sessionManager.ctx, newSlave, generation)
 
 	if oldSlave != nil {
@@ -39,7 +38,7 @@ func (server *Server) restartTerminal() error {
 	return nil
 }
 
-func (server *Server) rebuildExecManager(slave Slave) {
+func (server *Server) rebuildExecManager(slave Slave, generation int64) {
 	if !server.options.EnableAPI || server.terminalStatus == nil || server.broadcastCtrl == nil {
 		return
 	}
@@ -58,11 +57,8 @@ func (server *Server) rebuildExecManager(slave Slave) {
 	}
 
 	replayFn := func(raw []byte) {
-		encoded := make([]byte, base64.StdEncoding.EncodedLen(len(raw))+1)
-		encoded[0] = '1'
-		base64.StdEncoding.Encode(encoded[1:], raw)
 		select {
-		case server.sessionManager.broadcast <- encoded:
+		case server.sessionManager.broadcast <- newOutputBroadcastWithGeneration(raw, generation):
 		case <-time.After(5 * time.Second):
 			log.Printf("[API Replay] WARNING: broadcast channel full, replay dropped (%d bytes)", len(raw))
 		}

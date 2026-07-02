@@ -181,10 +181,10 @@ if (elem !== null) {
         });
     }
 
-    // According to https://developer.mozilla.org/en-US/docs/Web/API/Window/unload_event
-    // this event is unreliable and in some cases (Firefox is mentioned), having an
-    // "unload" event handler can have unwanted side effects. Consider commenting it out.
-    window.addEventListener("unload", () => {
+    window.addEventListener("pagehide", (event: PageTransitionEvent) => {
+        if (event.persisted) {
+            return;
+        }
         uninstallFaviconAlert();
         voiceInput?.close();
         closer();
