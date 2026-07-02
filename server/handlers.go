@@ -341,7 +341,7 @@ func (server *Server) indexVariables(r *http.Request) (map[string]interface{}, e
 	}
 
 	indexVars := map[string]interface{}{
-		"title": titleBuf.String(),
+		"title":   titleBuf.String(),
 		"favicon": server.options.Favicon,
 	}
 	return indexVars, err
@@ -357,7 +357,7 @@ func (server *Server) handleAuthToken(w http.ResponseWriter, r *http.Request) {
 			Value:    server.options.Credential,
 			Path:     "/",
 			MaxAge:   30 * 24 * 60 * 60, // 30 days
-			HttpOnly: false, // Allow JavaScript to read for compatibility
+			HttpOnly: false,             // Allow JavaScript to read for compatibility
 			Secure:   r.TLS != nil,
 			SameSite: http.SameSiteStrictMode,
 		})
@@ -371,6 +371,15 @@ func (server *Server) handleAuthToken(w http.ResponseWriter, r *http.Request) {
 func (server *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/javascript")
 	preferences, err := json.Marshal(server.buildPreferences())
+	if err != nil {
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+	shareDefaultTarget := ""
+	if server.shareManager != nil {
+		shareDefaultTarget = server.shareManager.DefaultTarget()
+	}
+	shareDefaultTargetJSON, err := json.Marshal(shareDefaultTarget)
 	if err != nil {
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
@@ -395,6 +404,7 @@ func (server *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		"var gotty_leader_idle_ms = " + strconv.Itoa(server.options.LeaderIdleMs) + ";",
 		"var gotty_show_terminal_state = " + strconv.FormatBool(server.options.ShowTerminalState) + ";",
 		"var gotty_share_enabled = " + strconv.FormatBool(server.options.ShareEnabled) + ";",
+		"var gotty_share_default_target = " + string(shareDefaultTargetJSON) + ";",
 		"var gotty_preferences = " + string(preferences) + ";",
 	}
 

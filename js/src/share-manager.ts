@@ -1,4 +1,5 @@
 declare var gotty_share_enabled: boolean;
+declare var gotty_share_default_target: string;
 
 type ShareStatus = "creating" | "active" | "expired" | "stopped" | "failed" | "lost";
 
@@ -259,15 +260,16 @@ export function initShareManager(): void {
     panel.className = "panel";
     container.appendChild(panel);
 
+    const initialDefaultTarget = typeof gotty_share_default_target !== "undefined" ? gotty_share_default_target : "";
     let shares: ShareRecord[] = [];
-    let defaultTarget = "";
+    let defaultTarget = initialDefaultTarget;
     let publicDomain = "httptunnel.top";
     let subdomainPrefix = "gotty-";
     let loading = false;
     let statusMessage = "";
     let shareConfigured = false;
     let missingConfig: string[] = [];
-    let targetValue = "";
+    let targetValue = initialDefaultTarget;
     let targetTouched = false;
     let subdomainValue = "";
     let expireValue = "";
@@ -475,14 +477,6 @@ export function initShareManager(): void {
         addTitle("Share");
         const form = document.createElement("div");
         form.className = "share-form";
-
-        const quick = document.createElement("button");
-        quick.type = "button";
-        quick.className = "share-primary";
-        quick.textContent = shareConfigured ? "Share this terminal" : "Configure HTTP tunnel first";
-        quick.disabled = loading || !defaultTarget || !shareConfigured;
-        quick.addEventListener("click", () => createShare(""));
-        form.appendChild(quick);
 
         const target = document.createElement("input");
         target.type = "text";

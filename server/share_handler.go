@@ -35,7 +35,7 @@ func (server *Server) wrapShareAuth(next http.Handler) http.Handler {
 			}
 		}
 
-		if isLocalShareRequest(r) && !server.isPublicShareHost(r.Host) {
+		if !server.isPublicShareHost(r.Host) {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -150,15 +150,6 @@ func writeShareError(w http.ResponseWriter, status int, code, message string) {
 		"code":    code,
 		"message": message,
 	})
-}
-
-func isLocalShareRequest(r *http.Request) bool {
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		host = r.RemoteAddr
-	}
-	ip := net.ParseIP(host)
-	return ip != nil && ip.IsLoopback()
 }
 
 func (server *Server) isPublicShareHost(host string) bool {
