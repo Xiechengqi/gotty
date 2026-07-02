@@ -179,10 +179,10 @@ func (c *HTTPTunnelClient) Stop(ctx context.Context) error {
 	}
 
 	var errs []error
+	if err := c.runControl(ctx, "disconnect", "--timeout-seconds", "10"); err != nil {
+		errs = append(errs, err)
+	}
 	if c.done != nil {
-		if err := c.runControl(ctx, "disconnect", "--timeout-seconds", "10"); err != nil {
-			errs = append(errs, err)
-		}
 		if err := c.waitOrKill(); err != nil {
 			errs = append(errs, err)
 		}
@@ -287,6 +287,9 @@ func (c *HTTPTunnelClient) exitError() error {
 func (c *HTTPTunnelClient) runControl(parent context.Context, args ...string) error {
 	if c.config.ClientPath == "" || c.config.RuntimeDir == "" {
 		return nil
+	}
+	if err := os.MkdirAll(c.config.RuntimeDir, 0700); err != nil {
+		return err
 	}
 	ctx, cancel := context.WithTimeout(parent, httpTunnelControlTimeout)
 	defer cancel()

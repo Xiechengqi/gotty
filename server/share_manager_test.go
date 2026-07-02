@@ -2,7 +2,9 @@ package server
 
 import (
 	"context"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -36,6 +38,96 @@ func TestShareRegistryMarksActiveRecordsLostOnStartup(t *testing.T) {
 	}
 	if updated.Status != ShareStatusLost {
 		t.Fatalf("expected lost status, got %q", updated.Status)
+	}
+}
+
+func TestRestartShareRestoresLostRecordInPlace(t *testing.T) {
+	dir := t.TempDir()
+	clientPath := filepath.Join(dir, "http-tunnel-client")
+	script := `#!/usr/bin/env sh
+set -eu
+mkdir -p "$HOME/.http-tunnel"
+case "$1" in
+  connect)
+    printf '%s\n' "$*" > "$HOME/args.txt"
+    printf '%s\n' '{"event":"startup","data":{"public_url":"https://gotty-xtlaat.httptunnel.top","tunnel_id":"tun_restore"}}'
+    while [ ! -f "$HOME/.http-tunnel/disconnect" ]; do sleep 0.05; done
+    ;;
+  disconnect)
+    touch "$HOME/.http-tunnel/disconnect"
+    ;;
+  release|runtime)
+    rm -f "$HOME/.http-tunnel/disconnect"
+    ;;
+  *)
+    exit 1
+    ;;
+esac
+`
+	if err := os.WriteFile(clientPath, []byte(script), 0700); err != nil {
+		t.Fatalf("write fake client: %v", err)
+	}
+
+	options := &Options{
+		ShareEnabled:      true,
+		ShareServerURL:    "https://httptunnel.top",
+		ShareClientPath:   clientPath,
+		ShareRuntimeDir:   filepath.Join(dir, "runtime"),
+		ShareRegistryFile: filepath.Join(dir, "shares.json"),
+		ShareMaxActive:    3,
+	}
+	manager, err := NewShareManager(context.Background(), options)
+	if err != nil {
+		t.Fatalf("new share manager: %v", err)
+	}
+	defer manager.Close()
+	manager.SetDefaultTarget("localhost:2222", "/")
+
+	lost := ShareRecord{
+		ID:         "sh_restore",
+		Type:       ShareTypeHTTP,
+		Target:     "localhost:2222",
+		Subdomain:  "gotty-xtlaat",
+		PublicURL:  "https://gotty-xtlaat.httptunnel.top",
+		Status:     ShareStatusLost,
+		CreatedAt:  time.Now().UTC().Add(-time.Minute),
+		LastError:  "gotty restarted before this share was stopped",
+		IsTerminal: true,
+	}
+	if err := manager.registry.Upsert(lost); err != nil {
+		t.Fatalf("upsert lost record: %v", err)
+	}
+
+	restarted, err := manager.RestartShare(lost.ID)
+	if err != nil {
+		t.Fatalf("restart lost share: %v", err)
+	}
+	if restarted.ID != lost.ID {
+		t.Fatalf("restart created new record id %q, want %q", restarted.ID, lost.ID)
+	}
+	if restarted.Status != ShareStatusActive {
+		t.Fatalf("restart status = %q, want %q", restarted.Status, ShareStatusActive)
+	}
+	if restarted.LastError != "" || restarted.StoppedAt != nil {
+		t.Fatalf("restart did not clear failure state: last_error=%q stopped_at=%v", restarted.LastError, restarted.StoppedAt)
+	}
+
+	stored, ok := manager.registry.Get(lost.ID)
+	if !ok {
+		t.Fatal("restarted record missing from registry")
+	}
+	if stored.Status != ShareStatusActive {
+		t.Fatalf("stored status = %q, want %q", stored.Status, ShareStatusActive)
+	}
+	args, err := os.ReadFile(filepath.Join(options.ShareRuntimeDir, lost.ID, "args.txt"))
+	if err != nil {
+		t.Fatalf("read fake client args: %v", err)
+	}
+	if !strings.Contains(string(args), "--subdomain gotty-xtlaat") {
+		t.Fatalf("restart did not reuse subdomain: %s", args)
+	}
+	if !strings.Contains(string(args), "--target http://localhost:2222") {
+		t.Fatalf("restart did not use current gotty target: %s", args)
 	}
 }
 

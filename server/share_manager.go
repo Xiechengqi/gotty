@@ -233,12 +233,80 @@ func (m *ShareManager) RestartShare(id string) (ShareRecord, error) {
 	if !ok {
 		return ShareRecord{}, fmt.Errorf("share not found")
 	}
-	return m.CreateShare(shareCreateRequest{
-		Type:       ShareTypeHTTP,
-		Target:     restartTarget(record),
-		Subdomain:  record.Subdomain,
-		TTLSeconds: record.TTLSeconds,
-	})
+	if record.Status == ShareStatusActive {
+		return record, nil
+	}
+	if record.Type != "" && record.Type != ShareTypeHTTP {
+		return ShareRecord{}, fmt.Errorf("share type must be http")
+	}
+	if err := m.validateConfig(); err != nil {
+		return ShareRecord{}, err
+	}
+
+	now := time.Now().UTC()
+	ttlSeconds := record.TTLSeconds
+	var expiresAt *time.Time
+	if ttlSeconds > 0 {
+		nextExpiresAt := now.Add(time.Duration(ttlSeconds) * time.Second)
+		expiresAt = &nextExpiresAt
+	}
+
+	m.mu.Lock()
+	if _, active := m.active[id]; active {
+		m.mu.Unlock()
+		return record, nil
+	}
+	if len(m.active)+m.creating >= m.options.ShareMaxActive {
+		m.mu.Unlock()
+		return ShareRecord{}, fmt.Errorf("maximum active shares reached")
+	}
+	defaultTarget := m.defaultTarget
+	defaultPath := m.defaultPath
+	m.creating++
+	m.mu.Unlock()
+	defer func() {
+		m.mu.Lock()
+		if m.creating > 0 {
+			m.creating--
+		}
+		m.mu.Unlock()
+	}()
+
+	requestedTarget := strings.TrimSpace(restartTarget(record))
+	isTerminal := record.IsTerminal || requestedTarget == "" || requestedTarget == defaultTarget
+	target := requestedTarget
+	publicPath := ""
+	if isTerminal {
+		target = defaultTarget
+		publicPath = defaultPath
+		if target == "" {
+			err := fmt.Errorf("gotty listener is not ready")
+			m.markShareRestartFailed(id, err)
+			return ShareRecord{}, err
+		}
+	}
+
+	displayTarget, targetURL, err := normalizeShareTarget(m.ctx, target)
+	if err != nil {
+		m.markShareRestartFailed(id, err)
+		return ShareRecord{}, err
+	}
+	_, subdomain, err := normalizeShareSubdomain(record.Subdomain)
+	if err != nil {
+		m.markShareRestartFailed(id, err)
+		return ShareRecord{}, err
+	}
+	if err := m.stopStoredShare(id); err != nil {
+		m.markShareRestartFailed(id, err)
+		return ShareRecord{}, err
+	}
+
+	restarted, err := m.startShareWithID(id, displayTarget, targetURL, subdomain, publicPath, ttlSeconds, expiresAt, isTerminal, now)
+	if err != nil {
+		m.markShareRestartFailed(id, err)
+		return ShareRecord{}, err
+	}
+	return restarted, nil
 }
 
 func (m *ShareManager) DeleteRecord(id string) error {
@@ -252,8 +320,14 @@ func (m *ShareManager) DeleteRecord(id string) error {
 }
 
 func (m *ShareManager) createShareWithSubdomain(displayTarget, targetURL, subdomain, publicPath string, ttlSeconds int, expiresAt *time.Time, isTerminal bool) (ShareRecord, error) {
+	return m.startShareWithID(randomShareID(), displayTarget, targetURL, subdomain, publicPath, ttlSeconds, expiresAt, isTerminal, time.Now().UTC())
+}
+
+func (m *ShareManager) startShareWithID(id, displayTarget, targetURL, subdomain, publicPath string, ttlSeconds int, expiresAt *time.Time, isTerminal bool, createdAt time.Time) (ShareRecord, error) {
 	now := time.Now().UTC()
-	id := randomShareID()
+	if createdAt.IsZero() {
+		createdAt = now
+	}
 	record := ShareRecord{
 		ID:         id,
 		Type:       ShareTypeHTTP,
@@ -261,7 +335,7 @@ func (m *ShareManager) createShareWithSubdomain(displayTarget, targetURL, subdom
 		Subdomain:  subdomain,
 		TTLSeconds: ttlSeconds,
 		Status:     ShareStatusCreating,
-		CreatedAt:  now,
+		CreatedAt:  createdAt,
 		ExpiresAt:  expiresAt,
 		IsTerminal: isTerminal,
 	}
@@ -311,6 +385,32 @@ func (m *ShareManager) createShareWithSubdomain(displayTarget, targetURL, subdom
 	}
 
 	return record, nil
+}
+
+func (m *ShareManager) markShareRestartFailed(id string, err error) {
+	if err == nil {
+		return
+	}
+	now := time.Now().UTC()
+	_, _ = m.registry.Update(id, func(record *ShareRecord) {
+		record.Status = ShareStatusFailed
+		record.StoppedAt = &now
+		record.LastError = err.Error()
+	})
+}
+
+func (m *ShareManager) stopStoredShare(id string) error {
+	clientPath, err := ResolveHTTPTunnelClientPath(m.options.ShareClientPath, m.options.ShareRuntimeDir)
+	if err != nil {
+		return err
+	}
+	tunnel := NewHTTPTunnelClient(HTTPTunnelConfig{
+		ClientPath:  clientPath,
+		RuntimeDir:  m.shareRuntimeDir(id),
+		ServerURL:   m.options.ShareServerURL,
+		CreateToken: m.options.ShareCreateToken,
+	})
+	return tunnel.Stop(context.Background())
 }
 
 func (m *ShareManager) runShare(ctx context.Context, id string, tunnel *HTTPTunnelClient) {
