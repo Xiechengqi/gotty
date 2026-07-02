@@ -322,7 +322,7 @@ export class WebTTY {
             this.handleMessage(data);
         });
 
-        connection.onClose(() => {
+        connection.onClose((event) => {
             if (this.connection !== connection) {
                 return;
             }
@@ -331,8 +331,12 @@ export class WebTTY {
             this.connection = null;
             this.term.deactivate();
             if (!this.stopped) {
-                this.term.showMessage("Reconnecting...", 0);
-                this.scheduleReconnect();
+                const closeMessage = this.describeClose(event);
+                if (this.isAuthenticationClose(event)) {
+                    this.term.showMessage(`${closeMessage}. Refresh the page or sign in again.`, 0);
+                    return;
+                }
+                this.scheduleReconnect(closeMessage);
             }
         });
 
@@ -484,18 +488,31 @@ export class WebTTY {
         }
     }
 
-    private scheduleReconnect(): void {
+    private scheduleReconnect(reason = ""): void {
         if (this.stopped || document.hidden) {
             return;
         }
         this.clearReconnectTimer();
         const delay = this.nextReconnectDelay();
         const seconds = Math.max(1, Math.round(delay / 1000));
-        this.term.showMessage(`Reconnecting in ${seconds}s...`, 0);
+        const message = reason
+            ? `${reason}. Reconnecting in ${seconds}s...`
+            : `Reconnecting in ${seconds}s...`;
+        this.term.showMessage(message, 0);
         this.reconnectTimer = setTimeout(() => {
             this.reconnectTimer = null;
             this.connectNow(false);
         }, delay);
+    }
+
+    private describeClose(event: CloseEvent): string {
+        const code = event.code || "no code";
+        const reason = event.reason ? `: ${event.reason}` : "";
+        return `WebSocket closed (${code})${reason}`;
+    }
+
+    private isAuthenticationClose(event: CloseEvent): boolean {
+        return event.code === 1008 && /auth/i.test(event.reason);
     }
 
     private nextReconnectDelay(): number {

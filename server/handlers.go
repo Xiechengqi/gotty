@@ -120,15 +120,18 @@ func (server *Server) processWSConn(ctx context.Context, conn *websocket.Conn, h
 		return errors.Wrapf(err, "failed to authenticate websocket connection")
 	}
 	if typ != websocket.TextMessage {
+		closeWebSocket(conn, websocket.CloseUnsupportedData, "invalid authentication message")
 		return errors.New("failed to authenticate websocket connection: invalid message type")
 	}
 
 	var init InitMessage
 	err = json.Unmarshal(initLine, &init)
 	if err != nil {
+		closeWebSocket(conn, websocket.CloseUnsupportedData, "invalid authentication message")
 		return errors.Wrapf(err, "failed to authenticate websocket connection")
 	}
 	if init.AuthToken != server.options.Credential {
+		closeWebSocket(conn, websocket.ClosePolicyViolation, "authentication failed")
 		return errors.New("failed to authenticate websocket connection")
 	}
 
@@ -404,6 +407,7 @@ func (server *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		"var gotty_leader_idle_ms = " + strconv.Itoa(server.options.LeaderIdleMs) + ";",
 		"var gotty_show_terminal_state = " + strconv.FormatBool(server.options.ShowTerminalState) + ";",
 		"var gotty_share_enabled = " + strconv.FormatBool(server.options.ShareEnabled) + ";",
+		"var gotty_share_public_host = " + strconv.FormatBool(server.isPublicShareHost(r.Host)) + ";",
 		"var gotty_share_default_target = " + string(shareDefaultTargetJSON) + ";",
 		"var gotty_preferences = " + string(preferences) + ";",
 	}

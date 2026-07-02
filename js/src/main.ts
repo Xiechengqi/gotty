@@ -1,5 +1,5 @@
 import { ConnectionFactory } from "./websocket";
-import { WebTTY, protocols } from "./webtty";
+import { WebTTY } from "./webtty";
 import { GoTTYXterm } from "./xterm";
 import { createIdleAlert } from "./idle-alert";
 import { installFaviconAlert } from "./favicon-alert";
@@ -164,7 +164,7 @@ if (elem !== null) {
     const basePath = window.location.pathname.endsWith('/') ? window.location.pathname : window.location.pathname + '/';
     const url = (httpsEnabled ? 'wss://' : 'ws://') + window.location.host + basePath + 'ws' + queryArgs;
     const args = window.location.search;
-    const factory = new ConnectionFactory(url, protocols);
+    const factory = new ConnectionFactory(url);
     const wt = new WebTTY(term, factory, args, authToken);
     installServerRestart(term, basePath, authToken);
     const closer = wt.open();

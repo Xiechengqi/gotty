@@ -2,7 +2,7 @@ export class ConnectionFactory {
     url: string;
     protocols: string[];
 
-    constructor(url: string, protocols: string[]) {
+    constructor(url: string, protocols: string[] = []) {
         this.url = url;
         this.protocols = protocols;
     };
@@ -16,7 +16,7 @@ export class Connection {
     bare: WebSocket;
 
     constructor(url: string, protocols: string[]) {
-        this.bare = new WebSocket(url, protocols);
+        this.bare = protocols.length > 0 ? new WebSocket(url, protocols) : new WebSocket(url);
     }
 
     open() {

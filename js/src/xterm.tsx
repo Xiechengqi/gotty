@@ -10,6 +10,7 @@ import { render, createRef, Component } from 'preact';
 import { Modal } from 'bootstrap';
 
 declare var gotty_show_terminal_state: boolean;
+declare var gotty_share_public_host: boolean;
 
 // 消息类型常量
 const MSG_UPLOAD_FILE = '7';
@@ -20,6 +21,10 @@ const PREFERRED_CHUNK_SIZE = 8 * 1024; // 8KB per chunk
 const COPY_SUCCESS_MESSAGE = "Copied to clipboard";
 const COPY_SUCCESS_TIMEOUT_MS = 1400;
 const COPY_SUCCESS_MIN_INTERVAL_MS = 1200;
+
+function isPublicShareHost(): boolean {
+    return typeof gotty_share_public_host !== 'undefined' && gotty_share_public_host;
+}
 
 interface UploadFileMessage {
     name: string;
@@ -402,7 +407,13 @@ export class GoTTYXterm {
         });
         this.term.loadAddon(new WebLinksAddon());
         this.term.loadAddon(this.fitAddOn);
-        this.term.loadAddon(new ImageAddon());
+        if (!isPublicShareHost()) {
+            try {
+                this.term.loadAddon(new ImageAddon());
+            } catch (err) {
+                console.warn("[GoTTY] xterm image addon was disabled:", err);
+            }
+        }
         this.term.loadAddon(this.zmodemAddon);
 
         this.message = elem.ownerDocument.createElement("div");

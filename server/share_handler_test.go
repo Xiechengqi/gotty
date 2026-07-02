@@ -3,6 +3,7 @@ package server
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -51,5 +52,49 @@ func TestShareAuthBlocksPublicTunnelHost(t *testing.T) {
 
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusForbidden)
+	}
+}
+
+func TestConfigMarksPublicShareHost(t *testing.T) {
+	server := &Server{
+		options: &Options{
+			ShareEnabled:   true,
+			ShareServerURL: "https://httptunnel.top",
+		},
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "https://gotty-demo.httptunnel.top/config.js", nil)
+	req.Host = "gotty-demo.httptunnel.top"
+	rec := httptest.NewRecorder()
+
+	server.handleConfig(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if !strings.Contains(rec.Body.String(), "var gotty_share_public_host = true;") {
+		t.Fatalf("config.js did not mark public share host: %s", rec.Body.String())
+	}
+}
+
+func TestConfigMarksNormalGottyHostAsPrivate(t *testing.T) {
+	server := &Server{
+		options: &Options{
+			ShareEnabled:   true,
+			ShareServerURL: "https://httptunnel.top",
+		},
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:8080/config.js", nil)
+	req.Host = "127.0.0.1:8080"
+	rec := httptest.NewRecorder()
+
+	server.handleConfig(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if !strings.Contains(rec.Body.String(), "var gotty_share_public_host = false;") {
+		t.Fatalf("config.js did not mark normal host as private: %s", rec.Body.String())
 	}
 }

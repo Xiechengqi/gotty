@@ -85,6 +85,30 @@ func TestGracefulShutdownClosesPreAuthWebSocket(t *testing.T) {
 	}, "pre-auth websocket shutdown")
 }
 
+func TestWebSocketAuthFailureSendsPolicyViolationClose(t *testing.T) {
+	server, ctx, cancel, gracefullCtx, _, counter := newWebSocketShutdownTestServer(t)
+	defer cancel()
+
+	ts := httptest.NewServer(server.generateHandleWS(ctx, gracefullCtx, cancel, counter))
+	defer ts.Close()
+
+	conn := dialTestWebSocket(t, ts.URL)
+	defer conn.Close()
+
+	if err := conn.WriteMessage(websocket.TextMessage, []byte(`{"AuthToken":"wrong"}`)); err != nil {
+		t.Fatalf("failed to send init message: %v", err)
+	}
+
+	_, _, err := conn.ReadMessage()
+	closeErr, ok := err.(*websocket.CloseError)
+	if !ok {
+		t.Fatalf("read error = %v, want websocket close error", err)
+	}
+	if closeErr.Code != websocket.ClosePolicyViolation || closeErr.Text != "authentication failed" {
+		t.Fatalf("close = %d %q, want %d %q", closeErr.Code, closeErr.Text, websocket.ClosePolicyViolation, "authentication failed")
+	}
+}
+
 func newWebSocketShutdownTestServer(t *testing.T) (*Server, context.Context, context.CancelFunc, context.Context, context.CancelFunc, *counter) {
 	t.Helper()
 
