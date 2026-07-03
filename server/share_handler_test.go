@@ -298,6 +298,44 @@ func TestCustomPasswordShareAuthSetsSessionCookie(t *testing.T) {
 	}
 }
 
+func TestCustomPasswordShareLoginThenAuthToken(t *testing.T) {
+	server := newShareAccessTestServer(t, ShareRecord{
+		CustomPassword: true,
+		PasswordHash:   mustSharePasswordHash(t, "open"),
+	})
+
+	form := url.Values{}
+	form.Set("password", "open")
+	form.Set("next", "/")
+	loginReq := httptest.NewRequest(http.MethodPost, "https://gotty-demo.httptunnel.top/-/share-auth", strings.NewReader(form.Encode()))
+	loginReq.Host = "gotty-demo.httptunnel.top"
+	loginReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	loginRec := httptest.NewRecorder()
+
+	server.handleSharePasswordAuth(loginRec, loginReq, "/")
+
+	if loginRec.Code != http.StatusSeeOther {
+		t.Fatalf("login status = %d, want %d; body=%s", loginRec.Code, http.StatusSeeOther, loginRec.Body.String())
+	}
+
+	authReq := httptest.NewRequest(http.MethodGet, "https://gotty-demo.httptunnel.top/auth_token.js", nil)
+	authReq.Host = "gotty-demo.httptunnel.top"
+	for _, cookie := range loginRec.Result().Cookies() {
+		authReq.AddCookie(cookie)
+	}
+	authRec := httptest.NewRecorder()
+
+	server.handleAuthToken(authRec, authReq)
+
+	body := authRec.Body.String()
+	if strings.Contains(body, server.options.Credential) {
+		t.Fatalf("auth_token.js leaked credential after share login: %s", body)
+	}
+	if !strings.Contains(body, shareAccessTokenPrefix) {
+		t.Fatalf("auth_token.js did not return share token after login: %s", body)
+	}
+}
+
 func TestPasswordlessAuthTokenDoesNotExposeCredential(t *testing.T) {
 	server := newShareAccessTestServer(t, ShareRecord{Passwordless: true})
 
