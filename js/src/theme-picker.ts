@@ -15,6 +15,7 @@ const STORAGE_FONT_FAMILY = "gotty-font-family";
 
 const DEFAULT_THEME = "nord";
 const DEFAULT_FONT_FAMILY = "'Source Code Pro', monospace";
+const PANEL_OPEN_EVENT = "gotty-panel-open";
 
 const FONT_SIZES = [10, 12, 14, 16, 18, 20, 24];
 
@@ -424,12 +425,23 @@ export function initThemePicker(term?: Terminal, options: ThemePickerOptions = {
     // --- Toggle ---
     btn.addEventListener("click", (e) => {
         e.stopPropagation();
-        container.classList.toggle("open");
+        if (container.classList.contains("open")) {
+            container.classList.remove("open");
+            return;
+        }
+        window.dispatchEvent(new CustomEvent(PANEL_OPEN_EVENT, { detail: "display" }));
+        container.classList.add("open");
     });
 
     // Close on outside click
     document.addEventListener("click", (e) => {
         if (!container.contains(e.target as Node) && e.target !== btn) {
+            container.classList.remove("open");
+        }
+    });
+
+    window.addEventListener(PANEL_OPEN_EVENT, (event) => {
+        if ((event as CustomEvent<string>).detail !== "display") {
             container.classList.remove("open");
         }
     });

@@ -36,6 +36,8 @@ const EXPIRY_UNITS = [
     { label: "Days", value: "days" },
 ];
 
+const PANEL_OPEN_EVENT = "gotty-panel-open";
+
 function basePath(): string {
     return window.location.pathname.endsWith("/") ? window.location.pathname : window.location.pathname + "/";
 }
@@ -68,6 +70,26 @@ function relativeTime(value?: string): string {
 
 function normalizeSuffix(value: string): string {
     return value.trim().toLowerCase().replace(/^gotty-/, "");
+}
+
+function fallbackCopyText(text: string): boolean {
+    const textarea = document.createElement("textarea");
+    textarea.value = text;
+    textarea.setAttribute("readonly", "true");
+    textarea.style.position = "fixed";
+    textarea.style.left = "-9999px";
+    textarea.style.top = "0";
+    document.body.appendChild(textarea);
+    textarea.focus();
+    textarea.select();
+    let copied = false;
+    try {
+        copied = document.execCommand("copy");
+    } catch (_) {
+        copied = false;
+    }
+    document.body.removeChild(textarea);
+    return copied;
 }
 
 function installShareStyles(): void {
@@ -335,8 +357,19 @@ export function initShareManager(): void {
 
     const copyText = async (text: string) => {
         if (!text) return;
-        await navigator.clipboard?.writeText(text);
-        statusMessage = "Copied";
+        let copied = false;
+        if (navigator.clipboard?.writeText) {
+            try {
+                await navigator.clipboard.writeText(text);
+                copied = true;
+            } catch (_) {
+                copied = false;
+            }
+        }
+        if (!copied) {
+            copied = fallbackCopyText(text);
+        }
+        statusMessage = copied ? "Copied" : "Copy failed";
         render();
         setTimeout(() => {
             statusMessage = "";
@@ -582,7 +615,10 @@ export function initShareManager(): void {
         create.className = "share-primary";
         create.textContent = loading ? "Working..." : (shareConfigured ? "Create share" : "Configure HTTP tunnel first");
         create.disabled = loading || !shareConfigured;
-        create.addEventListener("click", () => createShare(target.value));
+        create.addEventListener("click", (event) => {
+            event.stopPropagation();
+            void createShare(target.value);
+        });
         form.appendChild(create);
 
         panel.appendChild(form);
@@ -643,6 +679,7 @@ export function initShareManager(): void {
     };
 
     const openPanel = () => {
+        window.dispatchEvent(new CustomEvent(PANEL_OPEN_EVENT, { detail: "share" }));
         container.classList.add("open");
         if (!enabled) {
             renderDisabled();
@@ -677,6 +714,12 @@ export function initShareManager(): void {
     document.addEventListener("click", (event) => {
         const target = event.target as Node;
         if (!container.contains(target) && !connectionCount?.contains(target)) {
+            container.classList.remove("open");
+        }
+    });
+
+    window.addEventListener(PANEL_OPEN_EVENT, (event) => {
+        if ((event as CustomEvent<string>).detail !== "share") {
             container.classList.remove("open");
         }
     });

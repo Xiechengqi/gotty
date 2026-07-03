@@ -116,6 +116,9 @@ func (server *Server) authenticateASRWS(conn *websocket.Conn, r *http.Request) e
 	if server.isPasswordlessShareRequest(r) {
 		return nil
 	}
+	if _, ok := server.shareRecordForAccessToken(init.AuthToken); ok {
+		return nil
+	}
 	if init.AuthToken != server.options.Credential {
 		return errors.New("authentication failed")
 	}

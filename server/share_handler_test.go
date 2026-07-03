@@ -204,8 +204,8 @@ func TestPasswordlessAuthTokenDoesNotExposeCredential(t *testing.T) {
 	if strings.Contains(body, server.options.Credential) {
 		t.Fatalf("auth_token.js leaked credential: %s", body)
 	}
-	if !strings.Contains(body, `var gotty_auth_token = "";`) {
-		t.Fatalf("auth_token.js did not return empty token: %s", body)
+	if !strings.Contains(body, shareAccessTokenPrefix) {
+		t.Fatalf("auth_token.js did not return share token: %s", body)
 	}
 }
 
@@ -223,6 +223,55 @@ func TestReadOnlyShareBlocksShareManagementAPI(t *testing.T) {
 
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusForbidden, rec.Body.String())
+	}
+}
+
+func TestPublicShareRecordUsesForwardedHost(t *testing.T) {
+	server := newShareAccessTestServer(t, ShareRecord{Passwordless: true})
+
+	req := httptest.NewRequest(http.MethodGet, "http://localhost:2222/config.js", nil)
+	req.Host = "localhost:2222"
+	req.Header.Set("X-Forwarded-Host", "gotty-demo.httptunnel.top")
+
+	record, ok := server.publicShareRecordForRequest(req)
+	if !ok {
+		t.Fatal("expected forwarded host to match share")
+	}
+	if record.ID != "sh_access" {
+		t.Fatalf("record id = %q, want sh_access", record.ID)
+	}
+}
+
+func TestPublicShareRecordUsesTunnelSubdomain(t *testing.T) {
+	server := newShareAccessTestServer(t, ShareRecord{Passwordless: true})
+
+	req := httptest.NewRequest(http.MethodGet, "http://localhost:2222/config.js", nil)
+	req.Host = "localhost:2222"
+	req.Header.Set("X-Http-Tunnel-Subdomain", "gotty-demo")
+
+	record, ok := server.publicShareRecordForRequest(req)
+	if !ok {
+		t.Fatal("expected tunnel subdomain to match share")
+	}
+	if record.ID != "sh_access" {
+		t.Fatalf("record id = %q, want sh_access", record.ID)
+	}
+}
+
+func TestPasswordlessShareTokenMatchesRecordWithoutHost(t *testing.T) {
+	server := newShareAccessTestServer(t, ShareRecord{Passwordless: true})
+	record, ok := server.shareManager.GetShare("sh_access")
+	if !ok {
+		t.Fatal("share record missing")
+	}
+	token := server.shareAccessToken(record)
+
+	got, ok := server.shareRecordForAccessToken(token)
+	if !ok {
+		t.Fatal("expected token to match passwordless share")
+	}
+	if got.ID != record.ID {
+		t.Fatalf("record id = %q, want %q", got.ID, record.ID)
 	}
 }
 

@@ -132,6 +132,13 @@ func (server *Server) processWSConn(ctx context.Context, conn *websocket.Conn, h
 		return errors.Wrapf(err, "failed to authenticate websocket connection")
 	}
 	passwordlessShare := hasShareRecord && shareRecord.Passwordless
+	if !passwordlessShare {
+		if record, ok := server.shareRecordForAccessToken(init.AuthToken); ok {
+			shareRecord = record
+			hasShareRecord = true
+			passwordlessShare = true
+		}
+	}
 	if !passwordlessShare && init.AuthToken != server.options.Credential {
 		closeWebSocket(conn, websocket.ClosePolicyViolation, "authentication failed")
 		return errors.New("failed to authenticate websocket connection")
@@ -355,8 +362,8 @@ func (server *Server) indexVariables(r *http.Request) (map[string]interface{}, e
 
 func (server *Server) handleAuthToken(w http.ResponseWriter, r *http.Request) {
 	token := server.options.Credential
-	if server.isPasswordlessShareRequest(r) {
-		token = ""
+	if record, ok := server.publicShareRecordForRequest(r); ok && record.Passwordless {
+		token = server.shareAccessToken(record)
 	}
 
 	// Check if cookie already exists
@@ -430,7 +437,7 @@ func (server *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		"var gotty_show_terminal_state = " + strconv.FormatBool(server.options.ShowTerminalState) + ";",
 		"var gotty_restart_mode = '" + restartMode + "';",
 		"var gotty_share_enabled = " + strconv.FormatBool(server.options.ShareEnabled) + ";",
-		"var gotty_share_public_host = " + strconv.FormatBool(server.isPublicShareHost(r.Host)) + ";",
+		"var gotty_share_public_host = " + strconv.FormatBool(server.isPublicShareRequest(r)) + ";",
 		"var gotty_share_readonly = " + strconv.FormatBool(shareReadOnly) + ";",
 		"var gotty_share_passwordless = " + strconv.FormatBool(sharePasswordless) + ";",
 		"var gotty_share_default_target = " + string(shareDefaultTargetJSON) + ";",

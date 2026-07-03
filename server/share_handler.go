@@ -155,10 +155,53 @@ func (server *Server) publicShareRecordForRequest(r *http.Request) (ShareRecord,
 	if r == nil || server.options == nil || !server.options.ShareEnabled || server.shareManager == nil {
 		return ShareRecord{}, false
 	}
-	if !server.isPublicShareHost(r.Host) {
-		return ShareRecord{}, false
+	domain := server.sharePublicDomainHost()
+	for _, host := range server.publicShareCandidateHosts(r) {
+		if record, ok := server.shareManager.GetShareByPublicHost(host, domain); ok {
+			return record, true
+		}
 	}
-	return server.shareManager.GetShareByPublicHost(r.Host, server.sharePublicDomainHost())
+	return ShareRecord{}, false
+}
+
+func (server *Server) isPublicShareRequest(r *http.Request) bool {
+	if r == nil || server.options == nil {
+		return false
+	}
+	for _, host := range server.publicShareCandidateHosts(r) {
+		if server.isPublicShareHost(host) {
+			return true
+		}
+	}
+	return false
+}
+
+func (server *Server) publicShareCandidateHosts(r *http.Request) []string {
+	if r == nil {
+		return nil
+	}
+	var hosts []string
+	add := func(value string) {
+		host := normalizedHost(value)
+		if host == "" {
+			return
+		}
+		for _, existing := range hosts {
+			if existing == host {
+				return
+			}
+		}
+		hosts = append(hosts, host)
+	}
+	add(r.Host)
+	add(r.Header.Get("X-Forwarded-Host"))
+	add(r.Header.Get("X-Original-Host"))
+	if subdomain := strings.TrimSpace(r.Header.Get("X-Http-Tunnel-Subdomain")); subdomain != "" {
+		if domain := server.sharePublicDomainHost(); domain != "" {
+			add(subdomain + "." + domain)
+		}
+	}
+	return hosts
 }
 
 func (server *Server) isReadOnlyShareRequest(r *http.Request) bool {
