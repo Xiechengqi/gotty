@@ -9,6 +9,21 @@ import (
 	"syscall"
 )
 
+const (
+	RestartModeAuto     = "auto"
+	RestartModeExec     = "exec"
+	RestartModeFork     = "fork"
+	RestartModeExit     = "exit"
+	RestartModeDisabled = "disabled"
+)
+
+type SelfRestartPlan struct {
+	Mode   string
+	Binary string
+	Args   []string
+	Env    []string
+}
+
 const selfRestartScript = `parent=$1
 shift
 i=0
@@ -30,6 +45,8 @@ if kill -0 "$parent" 2>/dev/null; then
 fi
 exec "$0" "$@"`
 
+var scheduleSelfRestartFunc = scheduleSelfRestart
+
 func scheduleSelfRestart(env map[string]string) error {
 	binary, err := currentExecutablePath()
 	if err != nil {
@@ -41,10 +58,7 @@ func scheduleSelfRestart(env map[string]string) error {
 	cmd.Stdin = nil
 	cmd.Stdout = nil
 	cmd.Stderr = nil
-	cmd.Env = os.Environ()
-	for key, value := range env {
-		cmd.Env = setEnv(cmd.Env, key, value)
-	}
+	cmd.Env = selfRestartEnviron(env)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 
 	if err := cmd.Start(); err != nil {
@@ -53,17 +67,45 @@ func scheduleSelfRestart(env map[string]string) error {
 	return cmd.Process.Release()
 }
 
+func newExecSelfRestartPlan(env map[string]string) (SelfRestartPlan, error) {
+	binary, err := currentExecutablePath()
+	if err != nil {
+		return SelfRestartPlan{}, err
+	}
+	args := append([]string{binary}, os.Args[1:]...)
+	return SelfRestartPlan{
+		Mode:   RestartModeExec,
+		Binary: binary,
+		Args:   args,
+		Env:    selfRestartEnviron(env),
+	}, nil
+}
+
+func ExecSelfRestart(plan SelfRestartPlan) error {
+	if plan.Mode != RestartModeExec {
+		return nil
+	}
+	return syscall.Exec(plan.Binary, plan.Args, plan.Env)
+}
+
+func selfRestartEnviron(extra map[string]string) []string {
+	env := os.Environ()
+	for key, value := range extra {
+		env = setEnv(env, key, value)
+	}
+	return env
+}
+
 func currentExecutablePath() (string, error) {
 	var candidates []string
+	if len(os.Args) > 0 && os.Args[0] != "" {
+		candidates = append(candidates, resolveArg0Candidates(os.Args[0])...)
+	}
 	if exe, err := os.Executable(); err == nil && exe != "" {
 		candidates = append(candidates, exe)
 		if stripped := strings.TrimSuffix(exe, " (deleted)"); stripped != exe {
 			candidates = append(candidates, stripped)
 		}
-	}
-
-	if len(os.Args) > 0 && os.Args[0] != "" {
-		candidates = append(candidates, resolveArg0Candidates(os.Args[0])...)
 	}
 
 	for _, candidate := range candidates {
@@ -76,6 +118,22 @@ func currentExecutablePath() (string, error) {
 	}
 
 	return "", os.ErrNotExist
+}
+
+func normalizeRestartMode(mode string) string {
+	mode = strings.TrimSpace(strings.ToLower(mode))
+	if mode == "" {
+		return RestartModeAuto
+	}
+	return mode
+}
+
+func effectiveRestartMode(mode string) string {
+	mode = normalizeRestartMode(mode)
+	if mode == RestartModeAuto {
+		return RestartModeExec
+	}
+	return mode
 }
 
 func resolveArg0Candidates(arg0 string) []string {

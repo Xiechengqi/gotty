@@ -19,6 +19,7 @@ declare var gotty_asr_hold_ms: number;
 declare var gotty_asr_hotkey: string;
 declare var gotty_preferences: Record<string, unknown>;
 declare var gotty_share_enabled: boolean;
+declare var gotty_restart_mode: string;
 
 // Helper function to get cookie value
 function getCookie(name: string): string | null {
@@ -56,8 +57,20 @@ function waitForServerRestart(term: GoTTYXterm, basePath: string): void {
     window.setTimeout(poll, 800);
 }
 
+function restartMessageForMode(mode: string): string {
+    if (mode === "exit") {
+        return "GoTTY is exiting for external restart...";
+    }
+    return "Restart request sent. Waiting for GoTTY to come back...";
+}
+
 function installServerRestart(term: GoTTYXterm, basePath: string, authToken: string): void {
+    const configuredRestartMode = typeof gotty_restart_mode !== "undefined" ? gotty_restart_mode : "exec";
     term.setRestartSender(async () => {
+        if (configuredRestartMode === "disabled") {
+            term.showMessage("Server restart is disabled", 3000);
+            return;
+        }
         try {
             const headers: Record<string, string> = {
                 "X-GoTTY-Action": "restart",
@@ -70,19 +83,24 @@ function installServerRestart(term: GoTTYXterm, basePath: string, authToken: str
                 credentials: "same-origin",
                 headers,
             });
+            let mode = configuredRestartMode;
+            let payload: any = null;
+            try {
+                payload = await response.json();
+                if (payload && typeof payload.mode === "string") {
+                    mode = payload.mode;
+                }
+            } catch (_) {
+                // Keep the configured mode.
+            }
             if (!response.ok) {
                 let message = `HTTP ${response.status}`;
-                try {
-                    const payload = await response.json();
-                    if (payload && typeof payload.message === "string") {
-                        message = payload.message;
-                    }
-                } catch (_) {
-                    // Keep the status-based message.
+                if (payload && typeof payload.message === "string") {
+                    message = payload.message;
                 }
                 throw new Error(message);
             }
-            term.showMessage("Restart request sent. Waiting for GoTTY to come back...", 0);
+            term.showMessage(restartMessageForMode(mode), 0);
             waitForServerRestart(term, basePath);
         } catch (err) {
             const message = err instanceof Error ? err.message : String(err);

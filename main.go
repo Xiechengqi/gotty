@@ -113,6 +113,18 @@ func main() {
 
 		err = waitSignals(errs, cancel, gCancel)
 
+		if plan, ok := srv.PendingSelfRestart(); ok {
+			if err != nil && err != context.Canceled {
+				fmt.Printf("Error: %s\n", err)
+				exit(err, 8)
+			}
+			if err := server.ExecSelfRestart(plan); err != nil {
+				fmt.Printf("Error: failed to exec restart: %s\n", err)
+				exit(err, 8)
+			}
+			return nil
+		}
+
 		if err != nil && err != context.Canceled {
 			fmt.Printf("Error: %s\n", err)
 			exit(err, 8)

@@ -42,6 +42,8 @@ type Server struct {
 	sessionManager   *SessionManager
 	restartMu        sync.Mutex
 	selfRestarting   bool
+	selfRestartMode  string
+	selfRestartPlan  *SelfRestartPlan
 
 	// API components
 	terminalStatus *TerminalStatus

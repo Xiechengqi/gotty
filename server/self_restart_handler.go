@@ -4,10 +4,13 @@ import (
 	"context"
 	"crypto/subtle"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
 )
+
+var ErrRestartDisabled = errors.New("server restart is disabled")
 
 func (server *Server) generateHandleSelfRestart(cancel context.CancelFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -20,35 +23,59 @@ func (server *Server) generateHandleSelfRestart(cancel context.CancelFunc) http.
 			return
 		}
 
-		if err := server.requestSelfRestart(cancel); err != nil {
+		mode, err := server.requestSelfRestart(cancel)
+		if errors.Is(err, ErrRestartDisabled) {
+			writeRestartError(w, http.StatusForbidden, "RESTART_DISABLED", err.Error())
+			return
+		}
+		if err != nil {
 			writeRestartError(w, http.StatusInternalServerError, "RESTART_FAILED", err.Error())
 			return
 		}
 
 		writeRestartJSON(w, http.StatusAccepted, map[string]interface{}{
 			"ok":      true,
-			"message": "restart scheduled",
+			"mode":    mode,
+			"message": restartMessage(mode),
 		})
 	}
 }
 
-func (server *Server) requestSelfRestart(cancel context.CancelFunc) error {
+func (server *Server) requestSelfRestart(cancel context.CancelFunc) (string, error) {
 	server.restartMu.Lock()
 	defer server.restartMu.Unlock()
 
 	if server.selfRestarting {
-		return nil
+		return server.selfRestartMode, nil
 	}
-	if err := scheduleSelfRestart(server.selfRestartEnv()); err != nil {
-		return err
+
+	mode := effectiveRestartMode(server.options.RestartMode)
+	switch mode {
+	case RestartModeDisabled:
+		return "", ErrRestartDisabled
+	case RestartModeExec:
+		plan, err := newExecSelfRestartPlan(server.selfRestartEnv())
+		if err != nil {
+			return "", err
+		}
+		server.selfRestartPlan = &plan
+	case RestartModeFork:
+		if err := scheduleSelfRestartFunc(server.selfRestartEnv()); err != nil {
+			return "", err
+		}
+	case RestartModeExit:
+		// Exit after responding; an external supervisor may restart the process.
+	default:
+		return "", ErrRestartDisabled
 	}
+	server.selfRestartMode = mode
 	server.selfRestarting = true
 
 	go func() {
 		time.Sleep(300 * time.Millisecond)
 		cancel()
 	}()
-	return nil
+	return mode, nil
 }
 
 func (server *Server) selfRestartEnv() map[string]string {
@@ -59,6 +86,32 @@ func (server *Server) selfRestartEnv() map[string]string {
 		}
 	}
 	return env
+}
+
+func (server *Server) PendingSelfRestart() (SelfRestartPlan, bool) {
+	server.restartMu.Lock()
+	defer server.restartMu.Unlock()
+
+	if server.selfRestartPlan == nil {
+		return SelfRestartPlan{}, false
+	}
+	plan := *server.selfRestartPlan
+	plan.Args = append([]string(nil), plan.Args...)
+	plan.Env = append([]string(nil), plan.Env...)
+	return plan, true
+}
+
+func restartMessage(mode string) string {
+	switch mode {
+	case RestartModeExec:
+		return "restart scheduled with in-place exec"
+	case RestartModeFork:
+		return "restart scheduled with fork"
+	case RestartModeExit:
+		return "exit scheduled for external restart"
+	default:
+		return "restart scheduled"
+	}
 }
 
 func (server *Server) authorizeControlRequest(r *http.Request) bool {

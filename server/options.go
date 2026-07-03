@@ -84,6 +84,8 @@ type Options struct {
 	// Set to 0 to disable.
 	PingInterval int `hcl:"ping_interval" flagName:"ping-interval" flagSName:"" flagDescribe:"WebSocket server ping interval in seconds (0 to disable)" default:"30"`
 
+	RestartMode string `hcl:"restart_mode" flagName:"restart-mode" flagDescribe:"Server restart mode for the web restart button: auto, exec, fork, exit, or disabled" default:"auto"`
+
 	ShareEnabled       bool   `hcl:"share_enabled" flagName:"share-enabled" flagDescribe:"Enable HTTP tunnel share management" default:"true"`
 	ShareServerURL     string `hcl:"share_server_url" flagName:"share-server-url" flagDescribe:"HTTP tunnel server URL" default:"https://httptunnel.top"`
 	ShareCreateToken   string `hcl:"share_create_token" flagName:"share-create-token" flagDescribe:"Optional HTTP tunnel creation bearer token" default:""`
@@ -174,6 +176,11 @@ func (options *Options) Validate() error {
 		if options.ExecTimeoutSec <= 0 {
 			return errors.New("api-exec-timeout must be > 0 when API is enabled")
 		}
+	}
+	switch normalizeRestartMode(options.RestartMode) {
+	case RestartModeAuto, RestartModeExec, RestartModeFork, RestartModeExit, RestartModeDisabled:
+	default:
+		return errors.New("restart-mode must be one of: auto, exec, fork, exit, disabled")
 	}
 	if options.ShareEnabled {
 		if options.ShareServerURL == "" {
