@@ -5,3 +5,4 @@ js/dist
 js/node_modules/*
 .claude
 server/http_tunnel_client_bin/http-tunnel-client
+/RECONNECT_REPLAY_PLAN.md
