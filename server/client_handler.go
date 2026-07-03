@@ -62,8 +62,22 @@ func (server *Server) handleClientInput(client *Client, message []byte) {
 		return
 	}
 
+	if client != nil && client.readOnly {
+		switch message[0] {
+		case '2': // Ping
+			enqueueClientMessage(client, []byte{'2'})
+		case '4': // Set encoding: kept harmless for protocol compatibility.
+		default:
+			log.Printf("ignored read-only share client message type %c", message[0])
+		}
+		return
+	}
+
 	switch message[0] {
 	case '1': // Input data
+		if !server.options.PermitWrite {
+			return
+		}
 		if len(message) > 1 {
 			decoded := make([]byte, base64.StdEncoding.DecodedLen(len(message)-1))
 			n, err := base64.StdEncoding.Decode(decoded, message[1:])
@@ -90,6 +104,9 @@ func (server *Server) handleClientInput(client *Client, message []byte) {
 		}
 		server.sessionManager.HandleClientResize(client, resizeReq)
 	case '7': // Upload file
+		if !server.options.PermitWrite {
+			return
+		}
 		if len(message) > 1 {
 			server.sessionManager.HandleFileUpload(message[1:])
 		}

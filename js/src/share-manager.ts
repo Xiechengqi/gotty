@@ -16,6 +16,8 @@ interface ShareRecord {
     stopped_at?: string;
     last_error?: string;
     is_terminal?: boolean;
+    read_only?: boolean;
+    passwordless?: boolean;
 }
 
 interface ShareListResponse {
@@ -151,6 +153,26 @@ function installShareStyles(): void {
 #gotty-share-panel .expiry-row {
     grid-template-columns: 1fr 112px;
 }
+#gotty-share-panel .option-row {
+    display: grid;
+    gap: 6px;
+}
+#gotty-share-panel .share-check {
+    min-height: 24px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: #ddd;
+    font-size: 12px;
+    cursor: pointer;
+}
+#gotty-share-panel .share-check input {
+    width: 14px;
+    height: 14px;
+    flex: 0 0 14px;
+    padding: 0;
+    margin: 0;
+}
 #gotty-share-panel .share-primary,
 #gotty-share-panel .share-small {
     border: 1px solid rgba(255,255,255,0.12);
@@ -274,6 +296,8 @@ export function initShareManager(): void {
     let subdomainValue = "";
     let expireValue = "";
     let expireUnit = "hours";
+    let readOnlyValue = false;
+    let passwordlessValue = false;
 
     const requestJSON = async (path: string, init?: RequestInit) => {
         const res = await fetch(shareAPI(path), {
@@ -343,6 +367,8 @@ export function initShareManager(): void {
                     target,
                     type: "http",
                     subdomain: subdomainValue.trim(),
+                    read_only: readOnlyValue,
+                    passwordless: passwordlessValue,
                     ...expiry,
                 }),
             }) as ShareRecord;
@@ -428,7 +454,10 @@ export function initShareManager(): void {
         const meta = document.createElement("div");
         meta.className = "share-meta";
         const statusText = record.status === "active" ? relativeTime(record.expires_at) : record.status;
-        meta.textContent = `${record.target} · ${statusText}`;
+        const flags: string[] = [];
+        if (record.read_only) flags.push("Read-only");
+        if (record.passwordless) flags.push("Passwordless");
+        meta.textContent = [record.target, statusText, ...flags].join(" · ");
         meta.title = record.target;
         body.appendChild(meta);
 
@@ -529,6 +558,16 @@ export function initShareManager(): void {
         row.appendChild(unitSelect);
         form.appendChild(row);
 
+        const optionsRow = document.createElement("div");
+        optionsRow.className = "option-row";
+        optionsRow.appendChild(checkbox("Read only", readOnlyValue, (checked) => {
+            readOnlyValue = checked;
+        }));
+        optionsRow.appendChild(checkbox("Passwordless", passwordlessValue, (checked) => {
+            passwordlessValue = checked;
+        }));
+        form.appendChild(optionsRow);
+
         const preview = document.createElement("div");
         preview.className = "share-preview";
         const suffix = normalizeSuffix(subdomainValue);
@@ -587,6 +626,20 @@ export function initShareManager(): void {
         status.className = "share-status";
         status.textContent = "Share management is not enabled. Start gotty with --share-enabled to configure sharing.";
         panel.appendChild(status);
+    };
+
+    const checkbox = (text: string, checked: boolean, onChange: (checked: boolean) => void) => {
+        const label = document.createElement("label");
+        label.className = "share-check";
+        const input = document.createElement("input");
+        input.type = "checkbox";
+        input.checked = checked;
+        input.addEventListener("change", () => onChange(input.checked));
+        label.appendChild(input);
+        const span = document.createElement("span");
+        span.textContent = text;
+        label.appendChild(span);
+        return label;
     };
 
     const openPanel = () => {

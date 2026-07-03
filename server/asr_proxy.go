@@ -18,6 +18,10 @@ func (server *Server) generateHandleASRWS(ctx context.Context, gracefullCtx cont
 			http.Error(w, "ASR is disabled", http.StatusNotFound)
 			return
 		}
+		if server.isReadOnlyShareRequest(r) {
+			http.Error(w, "ASR is disabled for read-only shares", http.StatusForbidden)
+			return
+		}
 		if r.Method != http.MethodGet {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
@@ -38,7 +42,7 @@ func (server *Server) generateHandleASRWS(ctx context.Context, gracefullCtx cont
 		clientCtx, clientCancel := withWebSocketShutdown(ctx, gracefullCtx, clientConn)
 		defer clientCancel()
 
-		if err := server.authenticateASRWS(clientConn); err != nil {
+		if err := server.authenticateASRWS(clientConn, r); err != nil {
 			if clientCtx.Err() != nil {
 				return
 			}
@@ -96,7 +100,7 @@ func (server *Server) generateHandleASRWS(ctx context.Context, gracefullCtx cont
 	}
 }
 
-func (server *Server) authenticateASRWS(conn *websocket.Conn) error {
+func (server *Server) authenticateASRWS(conn *websocket.Conn, r *http.Request) error {
 	typ, data, err := conn.ReadMessage()
 	if err != nil {
 		return errors.Wrap(err, "failed to read init message")
@@ -108,6 +112,9 @@ func (server *Server) authenticateASRWS(conn *websocket.Conn) error {
 	var init InitMessage
 	if err := json.Unmarshal(data, &init); err != nil {
 		return errors.Wrap(err, "failed to parse init message")
+	}
+	if server.isPasswordlessShareRequest(r) {
+		return nil
 	}
 	if init.AuthToken != server.options.Credential {
 		return errors.New("authentication failed")

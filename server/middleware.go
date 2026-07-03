@@ -25,6 +25,11 @@ func (server *Server) wrapHeaders(handler http.Handler) http.Handler {
 
 func (server *Server) wrapBasicAuth(handler http.Handler, credential string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if server.isPasswordlessShareRequest(r) {
+			handler.ServeHTTP(w, r)
+			return
+		}
+
 		// Check cookie first for persistent auth
 		if cookie, err := r.Cookie("gotty_auth_token"); err == nil && cookie.Value == credential {
 			log.Printf("Cookie Authentication Succeeded: %s", r.RemoteAddr)

@@ -22,6 +22,10 @@ func (server *Server) wrapShareAuth(next http.Handler) http.Handler {
 			http.NotFound(w, r)
 			return
 		}
+		if server.isReadOnlyShareRequest(r) {
+			writeShareError(w, http.StatusForbidden, "READ_ONLY", "share management is disabled for read-only shares")
+			return
+		}
 
 		next.ServeHTTP(w, r)
 	})
@@ -136,15 +140,35 @@ func writeShareError(w http.ResponseWriter, status int, code, message string) {
 }
 
 func (server *Server) isPublicShareHost(host string) bool {
-	host = strings.ToLower(host)
-	if h, _, err := net.SplitHostPort(host); err == nil {
-		host = h
+	if server.options == nil {
+		return false
 	}
+	host = normalizedHost(host)
 	domain := server.sharePublicDomainHost()
 	if domain == "" {
 		return false
 	}
 	return host == domain || strings.HasSuffix(host, "."+domain)
+}
+
+func (server *Server) publicShareRecordForRequest(r *http.Request) (ShareRecord, bool) {
+	if r == nil || server.options == nil || !server.options.ShareEnabled || server.shareManager == nil {
+		return ShareRecord{}, false
+	}
+	if !server.isPublicShareHost(r.Host) {
+		return ShareRecord{}, false
+	}
+	return server.shareManager.GetShareByPublicHost(r.Host, server.sharePublicDomainHost())
+}
+
+func (server *Server) isReadOnlyShareRequest(r *http.Request) bool {
+	record, ok := server.publicShareRecordForRequest(r)
+	return ok && record.ReadOnly
+}
+
+func (server *Server) isPasswordlessShareRequest(r *http.Request) bool {
+	record, ok := server.publicShareRecordForRequest(r)
+	return ok && record.Passwordless
 }
 
 func (server *Server) sharePublicDomainHost() string {

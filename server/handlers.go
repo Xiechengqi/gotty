@@ -89,10 +89,11 @@ func (server *Server) generateHandleWS(ctx context.Context, gracefullCtx context
 		connCtx, connCancel := withWebSocketShutdown(ctx, gracefullCtx, conn)
 		defer connCancel()
 
+		shareRecord, hasShareRecord := server.publicShareRecordForRequest(r)
 		if server.options.PassHeaders {
-			err = server.processWSConn(connCtx, conn, r.Header)
+			err = server.processWSConn(connCtx, conn, r.Header, shareRecord, hasShareRecord)
 		} else {
-			err = server.processWSConn(connCtx, conn, nil)
+			err = server.processWSConn(connCtx, conn, nil, shareRecord, hasShareRecord)
 		}
 
 		switch err {
@@ -111,7 +112,7 @@ func (server *Server) generateHandleWS(ctx context.Context, gracefullCtx context
 	}
 }
 
-func (server *Server) processWSConn(ctx context.Context, conn *websocket.Conn, headers map[string][]string) error {
+func (server *Server) processWSConn(ctx context.Context, conn *websocket.Conn, headers map[string][]string, shareRecord ShareRecord, hasShareRecord bool) error {
 	typ, initLine, err := conn.ReadMessage()
 	if err != nil {
 		if ctx.Err() != nil {
@@ -130,7 +131,8 @@ func (server *Server) processWSConn(ctx context.Context, conn *websocket.Conn, h
 		closeWebSocket(conn, websocket.CloseUnsupportedData, "invalid authentication message")
 		return errors.Wrapf(err, "failed to authenticate websocket connection")
 	}
-	if init.AuthToken != server.options.Credential {
+	passwordlessShare := hasShareRecord && shareRecord.Passwordless
+	if !passwordlessShare && init.AuthToken != server.options.Credential {
 		closeWebSocket(conn, websocket.ClosePolicyViolation, "authentication failed")
 		return errors.New("failed to authenticate websocket connection")
 	}
@@ -162,10 +164,11 @@ func (server *Server) processWSConn(ctx context.Context, conn *websocket.Conn, h
 	}
 
 	client := &Client{
-		conn:  conn,
-		send:  make(chan []byte, 256),
-		ready: make(chan struct{}),
-		init:  init,
+		conn:     conn,
+		send:     make(chan []byte, 256),
+		ready:    make(chan struct{}),
+		init:     init,
+		readOnly: hasShareRecord && shareRecord.ReadOnly,
 	}
 
 	select {
@@ -351,13 +354,18 @@ func (server *Server) indexVariables(r *http.Request) (map[string]interface{}, e
 }
 
 func (server *Server) handleAuthToken(w http.ResponseWriter, r *http.Request) {
+	token := server.options.Credential
+	if server.isPasswordlessShareRequest(r) {
+		token = ""
+	}
+
 	// Check if cookie already exists
 	cookie, err := r.Cookie("gotty_auth_token")
-	if err != nil || cookie.Value != server.options.Credential {
+	if token != "" && (err != nil || cookie.Value != token) {
 		// Set persistent cookie for 30 days
 		http.SetCookie(w, &http.Cookie{
 			Name:     "gotty_auth_token",
-			Value:    server.options.Credential,
+			Value:    token,
 			Path:     "/",
 			MaxAge:   30 * 24 * 60 * 60, // 30 days
 			HttpOnly: false,             // Allow JavaScript to read for compatibility
@@ -367,8 +375,12 @@ func (server *Server) handleAuthToken(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/javascript")
-	// @TODO hashing?
-	w.Write([]byte("var gotty_auth_token = '" + server.options.Credential + "';"))
+	tokenJSON, err := json.Marshal(token)
+	if err != nil {
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+	w.Write([]byte("var gotty_auth_token = " + string(tokenJSON) + ";"))
 }
 
 func (server *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
@@ -388,13 +400,23 @@ func (server *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	shareRecord, hasShareRecord := server.publicShareRecordForRequest(r)
+	shareReadOnly := hasShareRecord && shareRecord.ReadOnly
+	sharePasswordless := hasShareRecord && shareRecord.Passwordless
+	permitWrite := server.options.PermitWrite && !shareReadOnly
+	enableASR := server.options.EnableASR && !shareReadOnly
+	restartMode := effectiveRestartMode(server.options.RestartMode)
+	if shareReadOnly {
+		restartMode = RestartModeDisabled
+	}
+
 	lines := []string{
 		"var gotty_term = 'xterm';",
 		"var gotty_ws_query_args = '" + server.options.WSQueryArgs + "';",
-		"var gotty_permit_write = " + strconv.FormatBool(server.options.PermitWrite) + ";",
+		"var gotty_permit_write = " + strconv.FormatBool(permitWrite) + ";",
 		"var gotty_enable_idle_alert = " + strconv.FormatBool(server.options.EnableIdleAlert) + ";",
 		"var gotty_idle_alert_timeout = " + strconv.Itoa(server.options.IdleAlertTimeout) + ";",
-		"var gotty_enable_asr = " + strconv.FormatBool(server.options.EnableASR) + ";",
+		"var gotty_enable_asr = " + strconv.FormatBool(enableASR) + ";",
 		"var gotty_asr_hold_ms = " + strconv.Itoa(server.options.ASRHoldMs) + ";",
 		"var gotty_asr_hotkey = '" + server.options.ASRHotkey + "';",
 		"var gotty_resize_policy = '" + server.options.ResizePolicy + "';",
@@ -406,9 +428,11 @@ func (server *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		"var gotty_leader_select = '" + server.options.LeaderSelect + "';",
 		"var gotty_leader_idle_ms = " + strconv.Itoa(server.options.LeaderIdleMs) + ";",
 		"var gotty_show_terminal_state = " + strconv.FormatBool(server.options.ShowTerminalState) + ";",
-		"var gotty_restart_mode = '" + effectiveRestartMode(server.options.RestartMode) + "';",
+		"var gotty_restart_mode = '" + restartMode + "';",
 		"var gotty_share_enabled = " + strconv.FormatBool(server.options.ShareEnabled) + ";",
 		"var gotty_share_public_host = " + strconv.FormatBool(server.isPublicShareHost(r.Host)) + ";",
+		"var gotty_share_readonly = " + strconv.FormatBool(shareReadOnly) + ";",
+		"var gotty_share_passwordless = " + strconv.FormatBool(sharePasswordless) + ";",
 		"var gotty_share_default_target = " + string(shareDefaultTargetJSON) + ";",
 		"var gotty_preferences = " + string(preferences) + ";",
 	}

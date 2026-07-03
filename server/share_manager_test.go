@@ -213,16 +213,18 @@ func TestRestartShareRestoresLostRecordInPlace(t *testing.T) {
 	}
 
 	lost := ShareRecord{
-		ID:         "sh_restore",
-		Type:       ShareTypeHTTP,
-		Target:     "localhost:2222",
-		Subdomain:  "gotty-xtlaat",
-		PublicURL:  "https://gotty-xtlaat.httptunnel.top",
-		OwnerID:    "owner-restore",
-		Status:     ShareStatusLost,
-		CreatedAt:  time.Now().UTC().Add(-time.Minute),
-		LastError:  "gotty restarted before this share was stopped",
-		IsTerminal: true,
+		ID:           "sh_restore",
+		Type:         ShareTypeHTTP,
+		Target:       "localhost:2222",
+		Subdomain:    "gotty-xtlaat",
+		PublicURL:    "https://gotty-xtlaat.httptunnel.top",
+		OwnerID:      "owner-restore",
+		Status:       ShareStatusLost,
+		CreatedAt:    time.Now().UTC().Add(-time.Minute),
+		LastError:    "gotty restarted before this share was stopped",
+		IsTerminal:   true,
+		ReadOnly:     true,
+		Passwordless: true,
 	}
 	if err := manager.registry.Upsert(lost); err != nil {
 		t.Fatalf("upsert lost record: %v", err)
@@ -241,6 +243,9 @@ func TestRestartShareRestoresLostRecordInPlace(t *testing.T) {
 	if restarted.LastError != "" || restarted.StoppedAt != nil {
 		t.Fatalf("restart did not clear failure state: last_error=%q stopped_at=%v", restarted.LastError, restarted.StoppedAt)
 	}
+	if !restarted.ReadOnly || !restarted.Passwordless {
+		t.Fatalf("restart did not preserve access flags: read_only=%v passwordless=%v", restarted.ReadOnly, restarted.Passwordless)
+	}
 
 	stored, ok := manager.registry.Get(lost.ID)
 	if !ok {
@@ -248,6 +253,9 @@ func TestRestartShareRestoresLostRecordInPlace(t *testing.T) {
 	}
 	if stored.Status != ShareStatusActive {
 		t.Fatalf("stored status = %q, want %q", stored.Status, ShareStatusActive)
+	}
+	if !stored.ReadOnly || !stored.Passwordless {
+		t.Fatalf("stored record did not preserve access flags: read_only=%v passwordless=%v", stored.ReadOnly, stored.Passwordless)
 	}
 	args, err := os.ReadFile(filepath.Join(options.ShareRuntimeDir, "owner-restore", lost.ID, "args.txt"))
 	if err != nil {
@@ -282,12 +290,22 @@ func TestCreateShareStoresOwnerAndUsesScopedRuntime(t *testing.T) {
 		t.Fatalf("configure instance: %v", err)
 	}
 
-	record, err := manager.CreateShare(shareCreateRequest{Subdomain: "unit"})
+	record, err := manager.CreateShare(shareCreateRequest{Subdomain: "unit", ReadOnly: true, Passwordless: true})
 	if err != nil {
 		t.Fatalf("create share: %v", err)
 	}
 	if record.OwnerID != "owner-create" {
 		t.Fatalf("owner id = %q, want owner-create", record.OwnerID)
+	}
+	if !record.ReadOnly || !record.Passwordless {
+		t.Fatalf("access flags = read_only:%v passwordless:%v, want true/true", record.ReadOnly, record.Passwordless)
+	}
+	stored, ok := manager.registry.Get(record.ID)
+	if !ok {
+		t.Fatal("created record missing from registry")
+	}
+	if !stored.ReadOnly || !stored.Passwordless {
+		t.Fatalf("stored access flags = read_only:%v passwordless:%v, want true/true", stored.ReadOnly, stored.Passwordless)
 	}
 	args, err := os.ReadFile(filepath.Join(options.ShareRuntimeDir, "owner-create", record.ID, "args.txt"))
 	if err != nil {
@@ -295,6 +313,53 @@ func TestCreateShareStoresOwnerAndUsesScopedRuntime(t *testing.T) {
 	}
 	if !strings.Contains(string(args), "--target http://localhost:2222") {
 		t.Fatalf("create did not use default target: %s", args)
+	}
+}
+
+func TestGetShareByPublicHostMatchesActiveOwnerRecord(t *testing.T) {
+	dir := t.TempDir()
+	options := &Options{
+		ShareEnabled:      true,
+		ShareServerURL:    "https://httptunnel.top",
+		ShareRegistryFile: filepath.Join(dir, "shares.json"),
+		ShareInstanceID:   "owner-host",
+		ShareMaxActive:    3,
+	}
+	manager, err := NewShareManager(context.Background(), options)
+	if err != nil {
+		t.Fatalf("new share manager: %v", err)
+	}
+	defer manager.Close()
+	if err := manager.ConfigureInstance("localhost:2222", "/"); err != nil {
+		t.Fatalf("configure instance: %v", err)
+	}
+	record := ShareRecord{
+		ID:           "sh_host",
+		Type:         ShareTypeHTTP,
+		Target:       "localhost:2222",
+		Subdomain:    "gotty-demo",
+		PublicURL:    "https://gotty-demo.httptunnel.top",
+		OwnerID:      "owner-host",
+		Status:       ShareStatusActive,
+		CreatedAt:    time.Now().UTC(),
+		IsTerminal:   true,
+		ReadOnly:     true,
+		Passwordless: true,
+	}
+	if err := manager.registry.Upsert(record); err != nil {
+		t.Fatalf("upsert record: %v", err)
+	}
+
+	got, ok := manager.GetShareByPublicHost("gotty-demo.httptunnel.top", "httptunnel.top")
+	if !ok {
+		t.Fatal("expected public host to match share")
+	}
+	if got.ID != record.ID || !got.ReadOnly || !got.Passwordless {
+		t.Fatalf("matched record = %#v", got)
+	}
+
+	if _, ok := manager.GetShareByPublicHost("gotty-other.httptunnel.top", "httptunnel.top"); ok {
+		t.Fatal("unexpected match for other host")
 	}
 }
 

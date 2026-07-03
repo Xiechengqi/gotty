@@ -20,6 +20,8 @@ declare var gotty_asr_hotkey: string;
 declare var gotty_preferences: Record<string, unknown>;
 declare var gotty_share_enabled: boolean;
 declare var gotty_restart_mode: string;
+declare var gotty_share_readonly: boolean;
+declare var gotty_share_passwordless: boolean;
 
 // Helper function to get cookie value
 function getCookie(name: string): string | null {
@@ -111,28 +113,36 @@ function installServerRestart(term: GoTTYXterm, basePath: string, authToken: str
 
 // Get auth token with fallback chain: localStorage -> Cookie -> global variable
 let authToken: string = '';
-try {
-    authToken = localStorage.getItem('gotty_auth_token') ||
-                getCookie('gotty_auth_token') ||
-                (typeof gotty_auth_token !== 'undefined' ? gotty_auth_token : '');
+const sharePasswordless = typeof gotty_share_passwordless !== "undefined" && gotty_share_passwordless;
+if (sharePasswordless) {
+    authToken = (typeof gotty_auth_token !== 'undefined' ? gotty_auth_token : '');
+} else {
+    try {
+        authToken = localStorage.getItem('gotty_auth_token') ||
+                    getCookie('gotty_auth_token') ||
+                    (typeof gotty_auth_token !== 'undefined' ? gotty_auth_token : '');
 
-    // Save to localStorage for persistence
-    if (authToken && authToken !== localStorage.getItem('gotty_auth_token')) {
-        localStorage.setItem('gotty_auth_token', authToken);
+        // Save to localStorage for persistence
+        if (authToken && authToken !== localStorage.getItem('gotty_auth_token')) {
+            localStorage.setItem('gotty_auth_token', authToken);
+        }
+    } catch (e) {
+        // Fallback if localStorage is not available
+        authToken = getCookie('gotty_auth_token') ||
+                    (typeof gotty_auth_token !== 'undefined' ? gotty_auth_token : '');
     }
-} catch (e) {
-    // Fallback if localStorage is not available
-    authToken = getCookie('gotty_auth_token') ||
-                (typeof gotty_auth_token !== 'undefined' ? gotty_auth_token : '');
 }
 
 const elem = document.getElementById("terminal")
 
 if (elem !== null) {
     var term: GoTTYXterm;
-    term = new GoTTYXterm(elem, gotty_preferences);
-    initThemePicker(term.term);
-    initShareManager();
+    const shareReadOnly = typeof gotty_share_readonly !== "undefined" && gotty_share_readonly;
+    term = new GoTTYXterm(elem, gotty_preferences, { readOnly: shareReadOnly });
+    initThemePicker(term.term, { controls: !shareReadOnly });
+    if (!shareReadOnly) {
+        initShareManager();
+    }
 
     const subscribeTermActivity = (cb: () => void) => {
         const unsubOutput = term.onOutput(cb);
@@ -184,11 +194,13 @@ if (elem !== null) {
     const args = window.location.search;
     const factory = new ConnectionFactory(url);
     const wt = new WebTTY(term, factory, args, authToken);
-    installServerRestart(term, basePath, authToken);
+    if (!shareReadOnly) {
+        installServerRestart(term, basePath, authToken);
+    }
     const closer = wt.open();
 
     let voiceInput: VoiceInput | null = null;
-    if (typeof gotty_enable_asr !== 'undefined' && gotty_enable_asr) {
+    if (!shareReadOnly && typeof gotty_enable_asr !== 'undefined' && gotty_enable_asr) {
         voiceInput = new VoiceInput({
             term,
             authToken: authToken,

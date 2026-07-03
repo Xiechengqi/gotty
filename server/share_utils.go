@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"fmt"
 	"math/big"
+	"net"
 	"net/url"
 	"strings"
 )
@@ -68,6 +69,40 @@ func appendPublicPath(base, path string) string {
 		path = "/" + path
 	}
 	return base + path
+}
+
+func normalizedHost(host string) string {
+	host = strings.TrimSpace(strings.ToLower(host))
+	host = strings.TrimSuffix(host, ".")
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	return strings.TrimSuffix(host, ".")
+}
+
+func publicShareSubdomainFromHost(host, domain string) (string, bool) {
+	host = normalizedHost(host)
+	domain = normalizedHost(domain)
+	if host == "" || domain == "" || host == domain {
+		return "", false
+	}
+	suffix := "." + domain
+	if !strings.HasSuffix(host, suffix) {
+		return "", false
+	}
+	subdomain := strings.TrimSuffix(host, suffix)
+	if subdomain == "" || strings.Contains(subdomain, ".") {
+		return "", false
+	}
+	return subdomain, true
+}
+
+func publicURLHost(raw string) string {
+	parsed, err := url.Parse(normalizeHTTPURL(raw))
+	if err != nil || parsed.Host == "" {
+		return ""
+	}
+	return normalizedHost(parsed.Host)
 }
 
 func randomShareID() string {

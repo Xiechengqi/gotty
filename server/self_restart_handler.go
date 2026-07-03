@@ -18,6 +18,10 @@ func (server *Server) generateHandleSelfRestart(cancel context.CancelFunc) http.
 			writeRestartError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "POST required")
 			return
 		}
+		if server.isReadOnlyShareRequest(r) {
+			writeRestartError(w, http.StatusForbidden, "READ_ONLY", "server restart is disabled for read-only shares")
+			return
+		}
 		if !server.authorizeControlRequest(r) {
 			writeRestartError(w, http.StatusUnauthorized, "UNAUTHORIZED", "restart is not authorized")
 			return

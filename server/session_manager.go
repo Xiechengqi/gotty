@@ -22,12 +22,13 @@ const (
 )
 
 type Client struct {
-	id     string
-	conn   *websocket.Conn
-	send   chan []byte
-	ready  chan struct{}
-	init   InitMessage
-	replay replaySnapshot
+	id       string
+	conn     *websocket.Conn
+	send     chan []byte
+	ready    chan struct{}
+	init     InitMessage
+	replay   replaySnapshot
+	readOnly bool
 }
 
 type replaySnapshot struct {
@@ -71,26 +72,26 @@ type SessionManager struct {
 	ctx         context.Context
 	generation  int64
 
-	resizePolicy     string
-	leaderSelect     string
-	leaderSwitch     string
-	leaderIdle       time.Duration
-	minCols          int
-	maxCols          int
-	minRows          int
-	maxRows          int
-	resizeDebounce      time.Duration
+	resizePolicy       string
+	leaderSelect       string
+	leaderSwitch       string
+	leaderIdle         time.Duration
+	minCols            int
+	maxCols            int
+	minRows            int
+	maxRows            int
+	resizeDebounce     time.Duration
 	historyReplayBytes int
-	configuredCols      int
-	configuredRows      int
-	leaderClientID      string
-	lastResizeAt        time.Time
-	lastResizeSource    string
-	activeCols          int
-	activeRows          int
-	nextClientSeq       int64
-	clientOrder         map[string]int64
-	clientSizes         map[string]resizeDimensions
+	configuredCols     int
+	configuredRows     int
+	leaderClientID     string
+	lastResizeAt       time.Time
+	lastResizeSource   string
+	activeCols         int
+	activeRows         int
+	nextClientSeq      int64
+	clientOrder        map[string]int64
+	clientSizes        map[string]resizeDimensions
 
 	// File upload state
 	uploadFile     interface{}

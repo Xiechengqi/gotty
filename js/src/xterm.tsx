@@ -45,6 +45,10 @@ interface UploadTask {
     startTime: number;
 }
 
+interface GoTTYXtermOptions {
+    readOnly?: boolean;
+}
+
 // ==================== Drop Overlay 组件 ====================
 
 class DropOverlay {
@@ -344,10 +348,12 @@ export class GoTTYXterm {
     private uploadCallbacks: Set<(fileName: string, progress: number) => void> = new Set();
     private lastCopyNotificationText: string = "";
     private lastCopyNotificationAt: number = 0;
+    private readOnly: boolean;
     altIsMeta: boolean = false;
 
-    constructor(elem: HTMLElement, preferences: Record<string, unknown> = {}) {
+    constructor(elem: HTMLElement, preferences: Record<string, unknown> = {}, options: GoTTYXtermOptions = {}) {
         this.elem = elem;
+        this.readOnly = !!options.readOnly;
         this.showTerminalStateOverlay =
             (typeof gotty_show_terminal_state !== 'undefined') ? !!gotty_show_terminal_state : false;
         this.encoder = new TextEncoder();
@@ -415,6 +421,9 @@ export class GoTTYXterm {
             }
         }
         this.term.loadAddon(this.zmodemAddon);
+        if (this.readOnly) {
+            this.term.options.disableStdin = true;
+        }
 
         this.message = elem.ownerDocument.createElement("div");
         this.message.className = "xterm-overlay";
@@ -437,7 +446,9 @@ export class GoTTYXterm {
         this.clearHistoryBtn.addEventListener('click', () => {
             this.clearHistory();
         });
-        elem.appendChild(this.clearHistoryBtn);
+        if (!this.readOnly) {
+            elem.appendChild(this.clearHistoryBtn);
+        }
 
         // 创建上传按钮
         this.uploadBtn = elem.ownerDocument.createElement("button");
@@ -448,7 +459,9 @@ export class GoTTYXterm {
         this.uploadBtn.addEventListener('click', () => {
             this.fileInput.click();
         });
-        elem.appendChild(this.uploadBtn);
+        if (!this.readOnly) {
+            elem.appendChild(this.uploadBtn);
+        }
 
         // 创建重启按钮
         this.restartBtn = elem.ownerDocument.createElement("button");
@@ -459,13 +472,19 @@ export class GoTTYXterm {
         this.restartBtn.addEventListener('click', () => {
             this.restartProcess();
         });
-        elem.appendChild(this.restartBtn);
+        if (!this.readOnly) {
+            elem.appendChild(this.restartBtn);
+        }
 
         // 创建隐藏的文件输入元素
         this.fileInput = elem.ownerDocument.createElement("input");
         this.fileInput.type = "file";
         this.fileInput.style.display = "none";
         this.fileInput.addEventListener('change', async (e) => {
+            if (this.readOnly) {
+                this.fileInput.value = '';
+                return;
+            }
             const files = (e.target as HTMLInputElement).files;
             if (files && files.length > 0) {
                 await this.uploadFile(files[0]);
@@ -522,7 +541,9 @@ export class GoTTYXterm {
         });
 
         // Set up drag & drop handler for file upload
-        this.setupDragDropHandler();
+        if (!this.readOnly) {
+            this.setupDragDropHandler();
+        }
 
         this.resizeListener = () => {
             this.scheduleFit();
@@ -622,6 +643,10 @@ export class GoTTYXterm {
 
     // Upload file to server
     private async uploadFile(file: File): Promise<void> {
+        if (this.readOnly) {
+            return;
+        }
+
         const fileName = file.name;
         const fileSize = file.size;
 
@@ -766,6 +791,9 @@ export class GoTTYXterm {
 
     // 取消上传
     private cancelUpload() {
+        if (this.readOnly) {
+            return;
+        }
         if (this.currentUploadTask && this.currentUploadTask.status === 'uploading') {
             this.currentUploadTask.status = 'cancelled';
 
@@ -988,10 +1016,16 @@ export class GoTTYXterm {
     };
 
     sendInput(data: Uint8Array) {
+        if (this.readOnly) {
+            return;
+        }
         return this.toServer(data)
     }
 
     onInput(callback: (input: string | Uint8Array) => void) {
+        if (this.readOnly) {
+            return;
+        }
         this.encoder = new TextEncoder()
         this.toServer = callback;
 
@@ -1028,6 +1062,9 @@ export class GoTTYXterm {
 
     // Set the upload file sender (called from WebTTY)
     setUploadFileSender(sender: (msg: string) => void) {
+        if (this.readOnly) {
+            return;
+        }
         this.sendUploadFile = sender;
     }
 
@@ -1089,6 +1126,9 @@ export class GoTTYXterm {
     }
 
     clearHistory(): void {
+        if (this.readOnly) {
+            return;
+        }
         // Send clear command to server
         this.sendInput(this.encoder.encode("clear\n"));
         // Clear local terminal display
@@ -1097,6 +1137,9 @@ export class GoTTYXterm {
     }
 
     restartProcess(): void {
+        if (this.readOnly) {
+            return;
+        }
         if (!this.sendRestart) {
             this.showMessage("Restart is not ready", 2000);
             return;

@@ -71,11 +71,29 @@ function applyFontPrefs(term: Terminal | undefined) {
 }
 
 // Build the picker UI and attach it to the page
-export function initThemePicker(term?: Terminal): void {
+interface ThemePickerOptions {
+    controls?: boolean;
+}
+
+export function initThemePicker(term?: Terminal, options: ThemePickerOptions = {}): void {
     const themes = (window as any).gotty_themes as ThemeMap | undefined;
     if (!themes) return;
 
     const names = Object.keys(themes);
+
+    let activeThemeName = localStorage.getItem(STORAGE_THEME) || (themes[DEFAULT_THEME] ? DEFAULT_THEME : "default");
+    let activeFontSize = localStorage.getItem(STORAGE_FONT_SIZE) || "";
+    let activeFontFamily = localStorage.getItem(STORAGE_FONT_FAMILY) || DEFAULT_FONT_FAMILY;
+
+    // Restore saved preferences on load, even when controls are hidden.
+    if (activeThemeName && themes[activeThemeName]) {
+        applyTheme(term, themes[activeThemeName]);
+    }
+    applyFontPrefs(term);
+
+    if (options.controls === false) {
+        return;
+    }
 
     // --- Styles ---
     const style = document.createElement("style");
@@ -269,16 +287,6 @@ export function initThemePicker(term?: Terminal): void {
 
     const panel = document.createElement("div");
     panel.className = "panel";
-
-    let activeThemeName = localStorage.getItem(STORAGE_THEME) || (themes[DEFAULT_THEME] ? DEFAULT_THEME : "default");
-    let activeFontSize = localStorage.getItem(STORAGE_FONT_SIZE) || "";
-    let activeFontFamily = localStorage.getItem(STORAGE_FONT_FAMILY) || DEFAULT_FONT_FAMILY;
-
-    // Restore saved preferences on load
-    if (activeThemeName && themes[activeThemeName]) {
-        applyTheme(term, themes[activeThemeName]);
-    }
-    applyFontPrefs(term);
 
     // ── Themes section ──
     const themeTitle = document.createElement("div");

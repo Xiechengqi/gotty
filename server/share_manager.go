@@ -155,6 +155,26 @@ func (m *ShareManager) GetShare(id string) (ShareRecord, bool) {
 	return record, true
 }
 
+func (m *ShareManager) GetShareByPublicHost(host, domain string) (ShareRecord, bool) {
+	host = normalizedHost(host)
+	subdomain, hasSubdomain := publicShareSubdomainFromHost(host, domain)
+	if host == "" {
+		return ShareRecord{}, false
+	}
+	for _, record := range m.List() {
+		if record.Status != ShareStatusActive {
+			continue
+		}
+		if hasSubdomain && strings.EqualFold(record.Subdomain, subdomain) {
+			return record, true
+		}
+		if publicURLHost(record.PublicURL) == host {
+			return record, true
+		}
+	}
+	return ShareRecord{}, false
+}
+
 func (m *ShareManager) CreateShare(req shareCreateRequest) (ShareRecord, error) {
 	shareType := req.Type
 	if shareType == "" {
@@ -221,7 +241,7 @@ func (m *ShareManager) CreateShare(req shareCreateRequest) (ShareRecord, error) 
 		if err != nil {
 			return ShareRecord{}, err
 		}
-		record, err := m.createShareWithSubdomain(ownerID, displayTarget, targetURL, subdomain, publicPath, ttlSeconds, expiresAt, isTerminal)
+		record, err := m.createShareWithSubdomain(ownerID, displayTarget, targetURL, subdomain, publicPath, ttlSeconds, expiresAt, isTerminal, req.ReadOnly, req.Passwordless)
 		if err == nil {
 			return record, nil
 		}
@@ -230,7 +250,7 @@ func (m *ShareManager) CreateShare(req shareCreateRequest) (ShareRecord, error) 
 			break
 		}
 	}
-	return m.saveFailedShare(ownerID, shareType, displayTarget, "", ttlSeconds, expiresAt, isTerminal, lastErr)
+	return m.saveFailedShare(ownerID, shareType, displayTarget, "", ttlSeconds, expiresAt, isTerminal, req.ReadOnly, req.Passwordless, lastErr)
 }
 
 func (m *ShareManager) StopShare(id string, status string) (ShareRecord, error) {
@@ -348,7 +368,7 @@ func (m *ShareManager) restartShare(id string, ttlOverride int) (ShareRecord, er
 		return ShareRecord{}, err
 	}
 
-	restarted, err := m.startShareWithID(id, ownerID, displayTarget, targetURL, subdomain, publicPath, ttlSeconds, expiresAt, isTerminal, now)
+	restarted, err := m.startShareWithID(id, ownerID, displayTarget, targetURL, subdomain, publicPath, ttlSeconds, expiresAt, isTerminal, record.ReadOnly, record.Passwordless, now)
 	if err != nil {
 		m.markShareRestartFailed(id, err)
 		return ShareRecord{}, err
@@ -369,26 +389,28 @@ func (m *ShareManager) DeleteRecord(id string) error {
 	return m.registry.Delete(id)
 }
 
-func (m *ShareManager) createShareWithSubdomain(ownerID, displayTarget, targetURL, subdomain, publicPath string, ttlSeconds int, expiresAt *time.Time, isTerminal bool) (ShareRecord, error) {
-	return m.startShareWithID(randomShareID(), ownerID, displayTarget, targetURL, subdomain, publicPath, ttlSeconds, expiresAt, isTerminal, time.Now().UTC())
+func (m *ShareManager) createShareWithSubdomain(ownerID, displayTarget, targetURL, subdomain, publicPath string, ttlSeconds int, expiresAt *time.Time, isTerminal, readOnly, passwordless bool) (ShareRecord, error) {
+	return m.startShareWithID(randomShareID(), ownerID, displayTarget, targetURL, subdomain, publicPath, ttlSeconds, expiresAt, isTerminal, readOnly, passwordless, time.Now().UTC())
 }
 
-func (m *ShareManager) startShareWithID(id, ownerID, displayTarget, targetURL, subdomain, publicPath string, ttlSeconds int, expiresAt *time.Time, isTerminal bool, createdAt time.Time) (ShareRecord, error) {
+func (m *ShareManager) startShareWithID(id, ownerID, displayTarget, targetURL, subdomain, publicPath string, ttlSeconds int, expiresAt *time.Time, isTerminal, readOnly, passwordless bool, createdAt time.Time) (ShareRecord, error) {
 	now := time.Now().UTC()
 	if createdAt.IsZero() {
 		createdAt = now
 	}
 	record := ShareRecord{
-		ID:         id,
-		Type:       ShareTypeHTTP,
-		Target:     displayTarget,
-		Subdomain:  subdomain,
-		TTLSeconds: ttlSeconds,
-		OwnerID:    ownerID,
-		Status:     ShareStatusCreating,
-		CreatedAt:  createdAt,
-		ExpiresAt:  expiresAt,
-		IsTerminal: isTerminal,
+		ID:           id,
+		Type:         ShareTypeHTTP,
+		Target:       displayTarget,
+		Subdomain:    subdomain,
+		TTLSeconds:   ttlSeconds,
+		OwnerID:      ownerID,
+		Status:       ShareStatusCreating,
+		CreatedAt:    createdAt,
+		ExpiresAt:    expiresAt,
+		IsTerminal:   isTerminal,
+		ReadOnly:     readOnly,
+		Passwordless: passwordless,
 	}
 
 	clientPath, err := ResolveHTTPTunnelClientPath(m.options.ShareClientPath, m.options.ShareRuntimeDir)
@@ -514,25 +536,27 @@ func (m *ShareManager) expireShare(ctx context.Context, id string, expiresAt tim
 	}
 }
 
-func (m *ShareManager) saveFailedShare(ownerID, shareType, target, subdomain string, ttlSeconds int, expiresAt *time.Time, isTerminal bool, err error) (ShareRecord, error) {
+func (m *ShareManager) saveFailedShare(ownerID, shareType, target, subdomain string, ttlSeconds int, expiresAt *time.Time, isTerminal, readOnly, passwordless bool, err error) (ShareRecord, error) {
 	now := time.Now().UTC()
 	message := "failed to create share"
 	if err != nil {
 		message = err.Error()
 	}
 	record := ShareRecord{
-		ID:         randomShareID(),
-		Type:       shareType,
-		Target:     target,
-		Subdomain:  subdomain,
-		TTLSeconds: ttlSeconds,
-		OwnerID:    ownerID,
-		Status:     ShareStatusFailed,
-		CreatedAt:  now,
-		ExpiresAt:  expiresAt,
-		StoppedAt:  &now,
-		LastError:  message,
-		IsTerminal: isTerminal,
+		ID:           randomShareID(),
+		Type:         shareType,
+		Target:       target,
+		Subdomain:    subdomain,
+		TTLSeconds:   ttlSeconds,
+		OwnerID:      ownerID,
+		Status:       ShareStatusFailed,
+		CreatedAt:    now,
+		ExpiresAt:    expiresAt,
+		StoppedAt:    &now,
+		LastError:    message,
+		IsTerminal:   isTerminal,
+		ReadOnly:     readOnly,
+		Passwordless: passwordless,
 	}
 	_ = m.registry.Upsert(record)
 	return ShareRecord{}, err

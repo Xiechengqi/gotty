@@ -29,15 +29,19 @@ type ShareRecord struct {
 	StoppedAt    *time.Time `json:"stopped_at,omitempty"`
 	LastError    string     `json:"last_error,omitempty"`
 	IsTerminal   bool       `json:"is_terminal,omitempty"`
+	ReadOnly     bool       `json:"read_only,omitempty"`
+	Passwordless bool       `json:"passwordless,omitempty"`
 }
 
 type shareCreateRequest struct {
-	Type        string `json:"type"`
-	Target      string `json:"target"`
-	Subdomain   string `json:"subdomain"`
-	ExpireValue int    `json:"expire_value"`
-	ExpireUnit  string `json:"expire_unit"`
-	TTLSeconds  int    `json:"ttl_seconds"`
+	Type         string `json:"type"`
+	Target       string `json:"target"`
+	Subdomain    string `json:"subdomain"`
+	ExpireValue  int    `json:"expire_value"`
+	ExpireUnit   string `json:"expire_unit"`
+	TTLSeconds   int    `json:"ttl_seconds"`
+	ReadOnly     bool   `json:"read_only"`
+	Passwordless bool   `json:"passwordless"`
 }
 
 type shareListResponse struct {
