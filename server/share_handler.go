@@ -22,9 +22,15 @@ func (server *Server) wrapShareAuth(next http.Handler) http.Handler {
 			http.NotFound(w, r)
 			return
 		}
-		if server.isReadOnlyShareRequest(r) {
-			writeShareError(w, http.StatusForbidden, "READ_ONLY", "share management is disabled for read-only shares")
-			return
+		if record, ok := server.publicShareRecordForRequest(r); ok {
+			if record.ReadOnly {
+				writeShareError(w, http.StatusForbidden, "READ_ONLY", "share management is disabled for read-only shares")
+				return
+			}
+			if record.CustomPassword && !server.isSharePasswordAuthenticated(r, record) {
+				writeShareError(w, http.StatusUnauthorized, "PASSWORD_REQUIRED", "share password is required")
+				return
+			}
 		}
 
 		next.ServeHTTP(w, r)
@@ -48,7 +54,7 @@ func (server *Server) handleShareCreate(w http.ResponseWriter, r *http.Request) 
 		writeShareError(w, http.StatusBadRequest, "CREATE_FAILED", err.Error())
 		return
 	}
-	writeShareJSON(w, http.StatusOK, record)
+	writeShareJSON(w, http.StatusOK, sanitizeShareRecord(record))
 }
 
 func (server *Server) handleShareList(w http.ResponseWriter, r *http.Request) {
@@ -58,7 +64,7 @@ func (server *Server) handleShareList(w http.ResponseWriter, r *http.Request) {
 	}
 	missing := server.shareManager.missingConfig()
 	writeShareJSON(w, http.StatusOK, shareListResponse{
-		Shares:          server.shareManager.List(),
+		Shares:          sanitizeShareRecords(server.shareManager.List()),
 		DefaultTarget:   server.shareManager.DefaultTarget(),
 		Enabled:         true,
 		Configured:      len(missing) == 0,
@@ -94,21 +100,21 @@ func (server *Server) handleShareItem(w http.ResponseWriter, r *http.Request) {
 			writeShareError(w, http.StatusNotFound, "NOT_FOUND", "share not found")
 			return
 		}
-		writeShareJSON(w, http.StatusOK, record)
+		writeShareJSON(w, http.StatusOK, sanitizeShareRecord(record))
 	case r.Method == http.MethodDelete && action == "":
 		record, err := server.shareManager.StopShare(id, ShareStatusStopped)
 		if err != nil {
 			writeShareError(w, http.StatusNotFound, "STOP_FAILED", err.Error())
 			return
 		}
-		writeShareJSON(w, http.StatusOK, record)
+		writeShareJSON(w, http.StatusOK, sanitizeShareRecord(record))
 	case r.Method == http.MethodPost && action == "restart":
 		record, err := server.shareManager.RestartShare(id)
 		if err != nil {
 			writeShareError(w, http.StatusBadRequest, "RESTART_FAILED", err.Error())
 			return
 		}
-		writeShareJSON(w, http.StatusOK, record)
+		writeShareJSON(w, http.StatusOK, sanitizeShareRecord(record))
 	case r.Method == http.MethodDelete && action == "record":
 		if err := server.shareManager.DeleteRecord(id); err != nil {
 			writeShareError(w, http.StatusBadRequest, "DELETE_FAILED", err.Error())

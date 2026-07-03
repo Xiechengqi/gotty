@@ -22,6 +22,7 @@ declare var gotty_share_enabled: boolean;
 declare var gotty_restart_mode: string;
 declare var gotty_share_readonly: boolean;
 declare var gotty_share_passwordless: boolean;
+declare var gotty_share_password_protected: boolean;
 
 // Helper function to get cookie value
 function getCookie(name: string): string | null {
@@ -114,7 +115,8 @@ function installServerRestart(term: GoTTYXterm, basePath: string, authToken: str
 // Get auth token with fallback chain: localStorage -> Cookie -> global variable
 let authToken: string = '';
 const sharePasswordless = typeof gotty_share_passwordless !== "undefined" && gotty_share_passwordless;
-if (sharePasswordless) {
+const sharePasswordProtected = typeof gotty_share_password_protected !== "undefined" && gotty_share_password_protected;
+if (sharePasswordless || sharePasswordProtected) {
     authToken = (typeof gotty_auth_token !== 'undefined' ? gotty_auth_token : '');
 } else {
     try {

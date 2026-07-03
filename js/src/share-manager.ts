@@ -18,6 +18,7 @@ interface ShareRecord {
     is_terminal?: boolean;
     read_only?: boolean;
     passwordless?: boolean;
+    custom_password?: boolean;
 }
 
 interface ShareListResponse {
@@ -320,6 +321,8 @@ export function initShareManager(): void {
     let expireUnit = "hours";
     let readOnlyValue = false;
     let passwordlessValue = false;
+    let customPasswordValue = false;
+    let customPasswordText = "";
 
     const requestJSON = async (path: string, init?: RequestInit) => {
         const res = await fetch(shareAPI(path), {
@@ -393,6 +396,9 @@ export function initShareManager(): void {
         statusMessage = "Creating share...";
         render();
         try {
+            if (customPasswordValue && customPasswordText.trim() === "") {
+                throw new Error("Custom password is required");
+            }
             const expiry = expiryPayload();
             const record = await requestJSON("/-/share", {
                 method: "POST",
@@ -402,10 +408,13 @@ export function initShareManager(): void {
                     subdomain: subdomainValue.trim(),
                     read_only: readOnlyValue,
                     passwordless: passwordlessValue,
+                    custom_password: customPasswordValue,
+                    password: customPasswordValue ? customPasswordText : "",
                     ...expiry,
                 }),
             }) as ShareRecord;
             statusMessage = "Share created";
+            customPasswordText = "";
             if (record.public_url) {
                 copyText(record.public_url).catch(() => undefined);
             }
@@ -490,6 +499,7 @@ export function initShareManager(): void {
         const flags: string[] = [];
         if (record.read_only) flags.push("Read-only");
         if (record.passwordless) flags.push("Passwordless");
+        if (record.custom_password) flags.push("Password protected");
         meta.textContent = [record.target, statusText, ...flags].join(" · ");
         meta.title = record.target;
         body.appendChild(meta);
@@ -595,11 +605,38 @@ export function initShareManager(): void {
         optionsRow.className = "option-row";
         optionsRow.appendChild(checkbox("Read only", readOnlyValue, (checked) => {
             readOnlyValue = checked;
+            render();
         }));
         optionsRow.appendChild(checkbox("Passwordless", passwordlessValue, (checked) => {
             passwordlessValue = checked;
+            if (checked) {
+                customPasswordValue = false;
+                customPasswordText = "";
+            }
+            render();
+        }));
+        optionsRow.appendChild(checkbox("Custom password", customPasswordValue, (checked) => {
+            customPasswordValue = checked;
+            if (checked) {
+                passwordlessValue = false;
+            } else {
+                customPasswordText = "";
+            }
+            render();
         }));
         form.appendChild(optionsRow);
+
+        if (customPasswordValue) {
+            const password = document.createElement("input");
+            password.type = "password";
+            password.placeholder = "Share password";
+            password.value = customPasswordText;
+            password.setAttribute("aria-label", "Share password");
+            password.addEventListener("input", () => {
+                customPasswordText = password.value;
+            });
+            form.appendChild(password);
+        }
 
         const preview = document.createElement("div");
         preview.className = "share-preview";

@@ -316,6 +316,83 @@ func TestCreateShareStoresOwnerAndUsesScopedRuntime(t *testing.T) {
 	}
 }
 
+func TestCreateShareStoresCustomPasswordHash(t *testing.T) {
+	dir := t.TempDir()
+	clientPath := writeFakeShareClient(t, dir)
+	options := &Options{
+		ShareEnabled:      true,
+		ShareServerURL:    "https://httptunnel.top",
+		ShareClientPath:   clientPath,
+		ShareRuntimeDir:   filepath.Join(dir, "runtime"),
+		ShareRegistryFile: filepath.Join(dir, "shares.json"),
+		ShareInstanceID:   "owner-password",
+		ShareMaxActive:    3,
+	}
+	manager, err := NewShareManager(context.Background(), options)
+	if err != nil {
+		t.Fatalf("new share manager: %v", err)
+	}
+	defer manager.Close()
+	if err := manager.ConfigureInstance("localhost:2222", "/"); err != nil {
+		t.Fatalf("configure instance: %v", err)
+	}
+
+	record, err := manager.CreateShare(shareCreateRequest{
+		Subdomain:      "password",
+		CustomPassword: true,
+		Password:       "letmein",
+	})
+	if err != nil {
+		t.Fatalf("create share: %v", err)
+	}
+	if !record.CustomPassword || record.Passwordless {
+		t.Fatalf("access flags = custom_password:%v passwordless:%v, want true/false", record.CustomPassword, record.Passwordless)
+	}
+	if record.PasswordHash == "" || strings.Contains(record.PasswordHash, "letmein") {
+		t.Fatalf("password hash was not stored safely: %q", record.PasswordHash)
+	}
+	if !verifySharePassword(record, "letmein") {
+		t.Fatal("stored password hash does not verify original password")
+	}
+
+	stored, ok := manager.registry.Get(record.ID)
+	if !ok {
+		t.Fatal("created record missing from registry")
+	}
+	if !stored.CustomPassword || stored.PasswordHash != record.PasswordHash {
+		t.Fatalf("stored custom password fields = custom:%v hash:%q, want custom true and matching hash", stored.CustomPassword, stored.PasswordHash)
+	}
+}
+
+func TestCreateShareRejectsInvalidCustomPasswordOptions(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		req  shareCreateRequest
+	}{
+		{
+			name: "blank password",
+			req: shareCreateRequest{
+				CustomPassword: true,
+				Password:       "  ",
+			},
+		},
+		{
+			name: "passwordless conflict",
+			req: shareCreateRequest{
+				Passwordless:   true,
+				CustomPassword: true,
+				Password:       "letmein",
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := buildShareAccessOptions(tc.req); err == nil {
+				t.Fatal("expected invalid custom password options to fail")
+			}
+		})
+	}
+}
+
 func TestGetShareByPublicHostMatchesActiveOwnerRecord(t *testing.T) {
 	dir := t.TempDir()
 	options := &Options{

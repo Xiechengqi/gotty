@@ -30,7 +30,7 @@ func (server *Server) shareRecordForAccessToken(token string) (ShareRecord, bool
 		return ShareRecord{}, false
 	}
 	for _, record := range server.shareManager.List() {
-		if record.Status != ShareStatusActive || !record.Passwordless {
+		if record.Status != ShareStatusActive || (!record.Passwordless && !record.CustomPassword) {
 			continue
 		}
 		expected := server.shareAccessToken(record)

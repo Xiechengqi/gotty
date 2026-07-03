@@ -25,7 +25,7 @@ func (server *Server) wrapHeaders(handler http.Handler) http.Handler {
 
 func (server *Server) wrapBasicAuth(handler http.Handler, credential string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if server.isPasswordlessShareRequest(r) {
+		if server.isPasswordlessShareRequest(r) || server.isCustomPasswordShareRequest(r) {
 			handler.ServeHTTP(w, r)
 			return
 		}

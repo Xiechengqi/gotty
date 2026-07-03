@@ -131,15 +131,19 @@ func (server *Server) processWSConn(ctx context.Context, conn *websocket.Conn, h
 		closeWebSocket(conn, websocket.CloseUnsupportedData, "invalid authentication message")
 		return errors.Wrapf(err, "failed to authenticate websocket connection")
 	}
-	passwordlessShare := hasShareRecord && shareRecord.Passwordless
-	if !passwordlessShare {
+	shareScopedAuth := hasShareRecord && shareRecord.Passwordless
+	if !shareScopedAuth {
 		if record, ok := server.shareRecordForAccessToken(init.AuthToken); ok {
 			shareRecord = record
 			hasShareRecord = true
-			passwordlessShare = true
+			shareScopedAuth = true
 		}
 	}
-	if !passwordlessShare && init.AuthToken != server.options.Credential {
+	if !shareScopedAuth && hasShareRecord && shareRecord.CustomPassword {
+		closeWebSocket(conn, websocket.ClosePolicyViolation, "authentication failed")
+		return errors.New("failed to authenticate websocket connection")
+	}
+	if !shareScopedAuth && init.AuthToken != server.options.Credential {
 		closeWebSocket(conn, websocket.ClosePolicyViolation, "authentication failed")
 		return errors.New("failed to authenticate websocket connection")
 	}
@@ -362,8 +366,15 @@ func (server *Server) indexVariables(r *http.Request) (map[string]interface{}, e
 
 func (server *Server) handleAuthToken(w http.ResponseWriter, r *http.Request) {
 	token := server.options.Credential
-	if record, ok := server.publicShareRecordForRequest(r); ok && record.Passwordless {
-		token = server.shareAccessToken(record)
+	if record, ok := server.publicShareRecordForRequest(r); ok {
+		switch {
+		case record.Passwordless:
+			token = server.shareAccessToken(record)
+		case record.CustomPassword && server.isSharePasswordAuthenticated(r, record):
+			token = server.shareAccessToken(record)
+		case record.CustomPassword:
+			token = ""
+		}
 	}
 
 	// Check if cookie already exists
@@ -410,6 +421,7 @@ func (server *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	shareRecord, hasShareRecord := server.publicShareRecordForRequest(r)
 	shareReadOnly := hasShareRecord && shareRecord.ReadOnly
 	sharePasswordless := hasShareRecord && shareRecord.Passwordless
+	sharePasswordProtected := hasShareRecord && shareRecord.CustomPassword
 	permitWrite := server.options.PermitWrite && !shareReadOnly
 	enableASR := server.options.EnableASR && !shareReadOnly
 	restartMode := effectiveRestartMode(server.options.RestartMode)
@@ -440,6 +452,7 @@ func (server *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		"var gotty_share_public_host = " + strconv.FormatBool(server.isPublicShareRequest(r)) + ";",
 		"var gotty_share_readonly = " + strconv.FormatBool(shareReadOnly) + ";",
 		"var gotty_share_passwordless = " + strconv.FormatBool(sharePasswordless) + ";",
+		"var gotty_share_password_protected = " + strconv.FormatBool(sharePasswordProtected) + ";",
 		"var gotty_share_default_target = " + string(shareDefaultTargetJSON) + ";",
 		"var gotty_preferences = " + string(preferences) + ";",
 	}

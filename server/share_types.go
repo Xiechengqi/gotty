@@ -14,34 +14,38 @@ const (
 )
 
 type ShareRecord struct {
-	ID           string     `json:"id"`
-	Type         string     `json:"type"`
-	Target       string     `json:"target"`
-	Subdomain    string     `json:"subdomain,omitempty"`
-	PublicURL    string     `json:"public_url"`
-	ConnectionID string     `json:"connection_id,omitempty"`
-	RemotePort   int        `json:"remote_port,omitempty"`
-	TTLSeconds   int        `json:"ttl_seconds,omitempty"`
-	OwnerID      string     `json:"owner_id,omitempty"`
-	Status       string     `json:"status"`
-	CreatedAt    time.Time  `json:"created_at"`
-	ExpiresAt    *time.Time `json:"expires_at,omitempty"`
-	StoppedAt    *time.Time `json:"stopped_at,omitempty"`
-	LastError    string     `json:"last_error,omitempty"`
-	IsTerminal   bool       `json:"is_terminal,omitempty"`
-	ReadOnly     bool       `json:"read_only,omitempty"`
-	Passwordless bool       `json:"passwordless,omitempty"`
+	ID             string     `json:"id"`
+	Type           string     `json:"type"`
+	Target         string     `json:"target"`
+	Subdomain      string     `json:"subdomain,omitempty"`
+	PublicURL      string     `json:"public_url"`
+	ConnectionID   string     `json:"connection_id,omitempty"`
+	RemotePort     int        `json:"remote_port,omitempty"`
+	TTLSeconds     int        `json:"ttl_seconds,omitempty"`
+	OwnerID        string     `json:"owner_id,omitempty"`
+	Status         string     `json:"status"`
+	CreatedAt      time.Time  `json:"created_at"`
+	ExpiresAt      *time.Time `json:"expires_at,omitempty"`
+	StoppedAt      *time.Time `json:"stopped_at,omitempty"`
+	LastError      string     `json:"last_error,omitempty"`
+	IsTerminal     bool       `json:"is_terminal,omitempty"`
+	ReadOnly       bool       `json:"read_only,omitempty"`
+	Passwordless   bool       `json:"passwordless,omitempty"`
+	CustomPassword bool       `json:"custom_password,omitempty"`
+	PasswordHash   string     `json:"password_hash,omitempty"`
 }
 
 type shareCreateRequest struct {
-	Type         string `json:"type"`
-	Target       string `json:"target"`
-	Subdomain    string `json:"subdomain"`
-	ExpireValue  int    `json:"expire_value"`
-	ExpireUnit   string `json:"expire_unit"`
-	TTLSeconds   int    `json:"ttl_seconds"`
-	ReadOnly     bool   `json:"read_only"`
-	Passwordless bool   `json:"passwordless"`
+	Type           string `json:"type"`
+	Target         string `json:"target"`
+	Subdomain      string `json:"subdomain"`
+	ExpireValue    int    `json:"expire_value"`
+	ExpireUnit     string `json:"expire_unit"`
+	TTLSeconds     int    `json:"ttl_seconds"`
+	ReadOnly       bool   `json:"read_only"`
+	Passwordless   bool   `json:"passwordless"`
+	CustomPassword bool   `json:"custom_password"`
+	Password       string `json:"password"`
 }
 
 type shareListResponse struct {

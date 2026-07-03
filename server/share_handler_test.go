@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -188,6 +189,115 @@ func TestNonPasswordlessShareStillRequiresBasicAuth(t *testing.T) {
 	}
 }
 
+func TestCustomPasswordShareSkipsGlobalBasicAuth(t *testing.T) {
+	server := newShareAccessTestServer(t, ShareRecord{
+		CustomPassword: true,
+		PasswordHash:   mustSharePasswordHash(t, "open"),
+	})
+	handler := server.wrapBasicAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}), server.options.Credential)
+
+	req := httptest.NewRequest(http.MethodGet, "https://gotty-demo.httptunnel.top/", nil)
+	req.Host = "gotty-demo.httptunnel.top"
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusNoContent, rec.Body.String())
+	}
+}
+
+func TestCustomPasswordSharePageBlocksUntilAuthenticated(t *testing.T) {
+	server := newShareAccessTestServer(t, ShareRecord{
+		CustomPassword: true,
+		PasswordHash:   mustSharePasswordHash(t, "open"),
+	})
+	called := false
+	handler := server.wrapSharePasswordAccess(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusNoContent)
+	}), "/")
+
+	req := httptest.NewRequest(http.MethodGet, "https://gotty-demo.httptunnel.top/", nil)
+	req.Host = "gotty-demo.httptunnel.top"
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if called {
+		t.Fatal("protected handler was called before share password authentication")
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if !strings.Contains(rec.Body.String(), "Share password") {
+		t.Fatalf("password page missing expected title: %s", rec.Body.String())
+	}
+
+	authReq := httptest.NewRequest(http.MethodGet, "https://gotty-demo.httptunnel.top/", nil)
+	authReq.Host = "gotty-demo.httptunnel.top"
+	record, ok := server.shareManager.GetShare("sh_access")
+	if !ok {
+		t.Fatal("share record missing")
+	}
+	authReq.AddCookie(&http.Cookie{Name: sharePasswordCookieName, Value: server.shareAccessToken(record)})
+	authRec := httptest.NewRecorder()
+
+	handler.ServeHTTP(authRec, authReq)
+
+	if !called {
+		t.Fatal("protected handler was not called after share password authentication")
+	}
+	if authRec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d", authRec.Code, http.StatusNoContent)
+	}
+}
+
+func TestCustomPasswordShareAuthSetsSessionCookie(t *testing.T) {
+	server := newShareAccessTestServer(t, ShareRecord{
+		CustomPassword: true,
+		PasswordHash:   mustSharePasswordHash(t, "open"),
+	})
+
+	form := url.Values{}
+	form.Set("password", "open")
+	form.Set("next", "/config.js")
+	req := httptest.NewRequest(http.MethodPost, "https://gotty-demo.httptunnel.top/-/share-auth", strings.NewReader(form.Encode()))
+	req.Host = "gotty-demo.httptunnel.top"
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+
+	server.handleSharePasswordAuth(rec, req, "/")
+
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusSeeOther, rec.Body.String())
+	}
+	if got := rec.Header().Get("Location"); got != "/config.js" {
+		t.Fatalf("redirect location = %q, want /config.js", got)
+	}
+	record, ok := server.shareManager.GetShare("sh_access")
+	if !ok {
+		t.Fatal("share record missing")
+	}
+	var found bool
+	for _, cookie := range rec.Result().Cookies() {
+		if cookie.Name == sharePasswordCookieName {
+			found = true
+			if cookie.Value != server.shareAccessToken(record) {
+				t.Fatalf("cookie value = %q, want share access token", cookie.Value)
+			}
+			if !cookie.HttpOnly {
+				t.Fatal("share password cookie should be HttpOnly")
+			}
+		}
+	}
+	if !found {
+		t.Fatal("share password session cookie missing")
+	}
+}
+
 func TestPasswordlessAuthTokenDoesNotExposeCredential(t *testing.T) {
 	server := newShareAccessTestServer(t, ShareRecord{Passwordless: true})
 
@@ -209,6 +319,49 @@ func TestPasswordlessAuthTokenDoesNotExposeCredential(t *testing.T) {
 	}
 }
 
+func TestCustomPasswordAuthTokenRequiresSharePasswordSession(t *testing.T) {
+	server := newShareAccessTestServer(t, ShareRecord{
+		CustomPassword: true,
+		PasswordHash:   mustSharePasswordHash(t, "open"),
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "https://gotty-demo.httptunnel.top/auth_token.js", nil)
+	req.Host = "gotty-demo.httptunnel.top"
+	rec := httptest.NewRecorder()
+
+	server.handleAuthToken(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	body := rec.Body.String()
+	if strings.Contains(body, server.options.Credential) {
+		t.Fatalf("auth_token.js leaked credential: %s", body)
+	}
+	if !strings.Contains(body, `var gotty_auth_token = "";`) {
+		t.Fatalf("unauthenticated custom password share should not get token: %s", body)
+	}
+
+	record, ok := server.shareManager.GetShare("sh_access")
+	if !ok {
+		t.Fatal("share record missing")
+	}
+	authReq := httptest.NewRequest(http.MethodGet, "https://gotty-demo.httptunnel.top/auth_token.js", nil)
+	authReq.Host = "gotty-demo.httptunnel.top"
+	authReq.AddCookie(&http.Cookie{Name: sharePasswordCookieName, Value: server.shareAccessToken(record)})
+	authRec := httptest.NewRecorder()
+
+	server.handleAuthToken(authRec, authReq)
+
+	authBody := authRec.Body.String()
+	if strings.Contains(authBody, server.options.Credential) {
+		t.Fatalf("auth_token.js leaked credential: %s", authBody)
+	}
+	if !strings.Contains(authBody, shareAccessTokenPrefix) {
+		t.Fatalf("authenticated custom password share did not get share token: %s", authBody)
+	}
+}
+
 func TestReadOnlyShareBlocksShareManagementAPI(t *testing.T) {
 	server := newShareAccessTestServer(t, ShareRecord{ReadOnly: true})
 	handler := server.wrapShareAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -223,6 +376,64 @@ func TestReadOnlyShareBlocksShareManagementAPI(t *testing.T) {
 
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusForbidden, rec.Body.String())
+	}
+}
+
+func TestCustomPasswordShareBlocksShareManagementAPIUntilAuthenticated(t *testing.T) {
+	server := newShareAccessTestServer(t, ShareRecord{
+		CustomPassword: true,
+		PasswordHash:   mustSharePasswordHash(t, "open"),
+	})
+	handler := server.wrapShareAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "https://gotty-demo.httptunnel.top/-/shares", nil)
+	req.Host = "gotty-demo.httptunnel.top"
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusUnauthorized, rec.Body.String())
+	}
+
+	record, ok := server.shareManager.GetShare("sh_access")
+	if !ok {
+		t.Fatal("share record missing")
+	}
+	authReq := httptest.NewRequest(http.MethodGet, "https://gotty-demo.httptunnel.top/-/shares", nil)
+	authReq.Host = "gotty-demo.httptunnel.top"
+	authReq.AddCookie(&http.Cookie{Name: sharePasswordCookieName, Value: server.shareAccessToken(record)})
+	authRec := httptest.NewRecorder()
+
+	handler.ServeHTTP(authRec, authReq)
+
+	if authRec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d; body=%s", authRec.Code, http.StatusNoContent, authRec.Body.String())
+	}
+}
+
+func TestShareListDoesNotExposePasswordHash(t *testing.T) {
+	server := newShareAccessTestServer(t, ShareRecord{
+		CustomPassword: true,
+		PasswordHash:   mustSharePasswordHash(t, "open"),
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "http://localhost:2222/-/shares", nil)
+	req.Host = "localhost:2222"
+	rec := httptest.NewRecorder()
+
+	server.handleShareList(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if strings.Contains(rec.Body.String(), "password_hash") || strings.Contains(rec.Body.String(), "open") {
+		t.Fatalf("share list leaked password hash or password: %s", rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"custom_password":true`) {
+		t.Fatalf("share list did not include custom password flag: %s", rec.Body.String())
 	}
 }
 
@@ -275,6 +486,26 @@ func TestPasswordlessShareTokenMatchesRecordWithoutHost(t *testing.T) {
 	}
 }
 
+func TestCustomPasswordShareTokenMatchesRecordWithoutHost(t *testing.T) {
+	server := newShareAccessTestServer(t, ShareRecord{
+		CustomPassword: true,
+		PasswordHash:   mustSharePasswordHash(t, "open"),
+	})
+	record, ok := server.shareManager.GetShare("sh_access")
+	if !ok {
+		t.Fatal("share record missing")
+	}
+	token := server.shareAccessToken(record)
+
+	got, ok := server.shareRecordForAccessToken(token)
+	if !ok {
+		t.Fatal("expected token to match custom password share")
+	}
+	if got.ID != record.ID {
+		t.Fatalf("record id = %q, want %q", got.ID, record.ID)
+	}
+}
+
 func newShareAccessTestServer(t *testing.T, overrides ShareRecord) *Server {
 	t.Helper()
 	options := &Options{
@@ -298,20 +529,34 @@ func newShareAccessTestServer(t *testing.T, overrides ShareRecord) *Server {
 	}
 
 	record := ShareRecord{
-		ID:           "sh_access",
-		Type:         ShareTypeHTTP,
-		Target:       "localhost:2222",
-		Subdomain:    "gotty-demo",
-		PublicURL:    "https://gotty-demo.httptunnel.top",
-		OwnerID:      "owner-access",
-		Status:       ShareStatusActive,
-		CreatedAt:    time.Now().UTC(),
-		IsTerminal:   true,
-		ReadOnly:     overrides.ReadOnly,
-		Passwordless: overrides.Passwordless,
+		ID:             "sh_access",
+		Type:           ShareTypeHTTP,
+		Target:         "localhost:2222",
+		Subdomain:      "gotty-demo",
+		PublicURL:      "https://gotty-demo.httptunnel.top",
+		OwnerID:        "owner-access",
+		Status:         ShareStatusActive,
+		CreatedAt:      time.Now().UTC(),
+		IsTerminal:     true,
+		ReadOnly:       overrides.ReadOnly,
+		Passwordless:   overrides.Passwordless,
+		CustomPassword: overrides.CustomPassword,
+		PasswordHash:   overrides.PasswordHash,
 	}
 	if err := manager.registry.Upsert(record); err != nil {
 		t.Fatalf("upsert share: %v", err)
 	}
 	return &Server{options: options, shareManager: manager}
+}
+
+func mustSharePasswordHash(t *testing.T, password string) string {
+	t.Helper()
+	access, err := buildShareAccessOptions(shareCreateRequest{
+		CustomPassword: true,
+		Password:       password,
+	})
+	if err != nil {
+		t.Fatalf("hash share password: %v", err)
+	}
+	return access.passwordHash
 }

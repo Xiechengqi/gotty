@@ -343,8 +343,15 @@ func (server *Server) setupHandlers(ctx context.Context, gracefullCtx context.Co
 	siteMux.HandleFunc(pathPrefix+"auth_token.js", server.handleAuthToken)
 	siteMux.HandleFunc(pathPrefix+"config.js", server.handleConfig)
 	siteMux.HandleFunc(pathPrefix+"themes.js", server.handleThemes)
+	siteMux.HandleFunc(pathPrefix+"-/share-auth", func(w http.ResponseWriter, r *http.Request) {
+		server.handleSharePasswordAuth(w, r, pathPrefix)
+	})
 
 	siteHandler := http.Handler(siteMux)
+
+	if server.options.ShareEnabled {
+		siteHandler = server.wrapSharePasswordAccess(siteHandler, pathPrefix)
+	}
 
 	if server.options.EnableBasicAuth {
 		log.Printf("Using Basic Authentication")

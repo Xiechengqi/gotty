@@ -113,11 +113,15 @@ func (server *Server) authenticateASRWS(conn *websocket.Conn, r *http.Request) e
 	if err := json.Unmarshal(data, &init); err != nil {
 		return errors.Wrap(err, "failed to parse init message")
 	}
-	if server.isPasswordlessShareRequest(r) {
+	shareRecord, hasShareRecord := server.publicShareRecordForRequest(r)
+	if hasShareRecord && shareRecord.Passwordless {
 		return nil
 	}
 	if _, ok := server.shareRecordForAccessToken(init.AuthToken); ok {
 		return nil
+	}
+	if hasShareRecord && shareRecord.CustomPassword {
+		return errors.New("authentication failed")
 	}
 	if init.AuthToken != server.options.Credential {
 		return errors.New("authentication failed")
