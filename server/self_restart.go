@@ -30,7 +30,7 @@ if kill -0 "$parent" 2>/dev/null; then
 fi
 exec "$0" "$@"`
 
-func scheduleSelfRestart() error {
+func scheduleSelfRestart(env map[string]string) error {
 	binary, err := currentExecutablePath()
 	if err != nil {
 		return err
@@ -41,6 +41,10 @@ func scheduleSelfRestart() error {
 	cmd.Stdin = nil
 	cmd.Stdout = nil
 	cmd.Stderr = nil
+	cmd.Env = os.Environ()
+	for key, value := range env {
+		cmd.Env = setEnv(cmd.Env, key, value)
+	}
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 
 	if err := cmd.Start(); err != nil {

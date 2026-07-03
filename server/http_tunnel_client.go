@@ -179,7 +179,7 @@ func (c *HTTPTunnelClient) Stop(ctx context.Context) error {
 	}
 
 	var errs []error
-	if err := c.runControl(ctx, "disconnect", "--timeout-seconds", "10"); err != nil {
+	if err := c.runControl(ctx, "disconnect", "--timeout-seconds", "10"); err != nil && !isMissingStoredTunnelError(err) {
 		errs = append(errs, err)
 	}
 	if c.done != nil {

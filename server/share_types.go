@@ -22,6 +22,7 @@ type ShareRecord struct {
 	ConnectionID string     `json:"connection_id,omitempty"`
 	RemotePort   int        `json:"remote_port,omitempty"`
 	TTLSeconds   int        `json:"ttl_seconds,omitempty"`
+	OwnerID      string     `json:"owner_id,omitempty"`
 	Status       string     `json:"status"`
 	CreatedAt    time.Time  `json:"created_at"`
 	ExpiresAt    *time.Time `json:"expires_at,omitempty"`

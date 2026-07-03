@@ -23,6 +23,7 @@ func TestShareRegistryMarksActiveRecordsLostOnStartup(t *testing.T) {
 		Type:      ShareTypeHTTP,
 		Target:    "127.0.0.1:8080",
 		PublicURL: "https://abc123.example.com",
+		OwnerID:   "owner-a",
 		Status:    ShareStatusActive,
 		CreatedAt: time.Now().UTC(),
 		ExpiresAt: timePtr(time.Now().UTC().Add(time.Hour)),
@@ -30,7 +31,7 @@ func TestShareRegistryMarksActiveRecordsLostOnStartup(t *testing.T) {
 	if err := registry.Upsert(record); err != nil {
 		t.Fatalf("upsert: %v", err)
 	}
-	if err := registry.MarkStartupState(false); err != nil {
+	if err := registry.MarkStartupState("owner-a", "127.0.0.1:8080"); err != nil {
 		t.Fatalf("mark startup state: %v", err)
 	}
 
@@ -40,6 +41,152 @@ func TestShareRegistryMarksActiveRecordsLostOnStartup(t *testing.T) {
 	}
 	if updated.Status != ShareStatusLost {
 		t.Fatalf("expected lost status, got %q", updated.Status)
+	}
+}
+
+func TestShareRegistryStartupOnlyMarksCurrentOwner(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "shares.json")
+	registry, err := NewShareRegistry(path)
+	if err != nil {
+		t.Fatalf("new registry: %v", err)
+	}
+	now := time.Now().UTC()
+	records := []ShareRecord{
+		{
+			ID:        "sh_owner_a",
+			Type:      ShareTypeHTTP,
+			Target:    "localhost:1111",
+			PublicURL: "https://owner-a.example.com",
+			OwnerID:   "owner-a",
+			Status:    ShareStatusActive,
+			CreatedAt: now,
+		},
+		{
+			ID:        "sh_owner_b",
+			Type:      ShareTypeHTTP,
+			Target:    "localhost:2222",
+			PublicURL: "https://owner-b.example.com",
+			OwnerID:   "owner-b",
+			Status:    ShareStatusActive,
+			CreatedAt: now,
+		},
+	}
+	for _, record := range records {
+		if err := registry.Upsert(record); err != nil {
+			t.Fatalf("upsert %s: %v", record.ID, err)
+		}
+	}
+
+	if err := registry.MarkStartupState("owner-b", "localhost:2222"); err != nil {
+		t.Fatalf("mark startup state: %v", err)
+	}
+
+	ownerA, _ := registry.Get("sh_owner_a")
+	if ownerA.Status != ShareStatusActive {
+		t.Fatalf("owner-a status = %q, want active", ownerA.Status)
+	}
+	ownerB, _ := registry.Get("sh_owner_b")
+	if ownerB.Status != ShareStatusLost {
+		t.Fatalf("owner-b status = %q, want lost", ownerB.Status)
+	}
+}
+
+func TestShareRegistryAdoptsOnlyMatchingOwnerlessTerminalRecord(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "shares.json")
+	registry, err := NewShareRegistry(path)
+	if err != nil {
+		t.Fatalf("new registry: %v", err)
+	}
+	now := time.Now().UTC()
+	matching := ShareRecord{
+		ID:         "sh_matching",
+		Type:       ShareTypeHTTP,
+		Target:     "localhost:2222",
+		Subdomain:  "gotty-matching",
+		PublicURL:  "https://gotty-matching.httptunnel.top",
+		Status:     ShareStatusActive,
+		CreatedAt:  now,
+		IsTerminal: true,
+	}
+	otherPort := ShareRecord{
+		ID:         "sh_other_port",
+		Type:       ShareTypeHTTP,
+		Target:     "localhost:3333",
+		Subdomain:  "gotty-other",
+		PublicURL:  "https://gotty-other.httptunnel.top",
+		Status:     ShareStatusActive,
+		CreatedAt:  now,
+		IsTerminal: true,
+	}
+	explicitTarget := ShareRecord{
+		ID:        "sh_explicit",
+		Type:      ShareTypeHTTP,
+		Target:    "localhost:2222",
+		PublicURL: "https://gotty-explicit.httptunnel.top",
+		Status:    ShareStatusActive,
+		CreatedAt: now,
+	}
+	for _, record := range []ShareRecord{matching, otherPort, explicitTarget} {
+		if err := registry.Upsert(record); err != nil {
+			t.Fatalf("upsert %s: %v", record.ID, err)
+		}
+	}
+
+	if err := registry.MarkStartupState("owner-current", "localhost:2222"); err != nil {
+		t.Fatalf("mark startup state: %v", err)
+	}
+
+	gotMatching, _ := registry.Get(matching.ID)
+	if gotMatching.OwnerID != "owner-current" || gotMatching.Status != ShareStatusLost {
+		t.Fatalf("matching record = owner:%q status:%q, want owner-current/lost", gotMatching.OwnerID, gotMatching.Status)
+	}
+	gotOther, _ := registry.Get(otherPort.ID)
+	if gotOther.OwnerID != "" || gotOther.Status != ShareStatusActive {
+		t.Fatalf("other port record = owner:%q status:%q, want ownerless/active", gotOther.OwnerID, gotOther.Status)
+	}
+	gotExplicit, _ := registry.Get(explicitTarget.ID)
+	if gotExplicit.OwnerID != "" || gotExplicit.Status != ShareStatusActive {
+		t.Fatalf("explicit target record = owner:%q status:%q, want ownerless/active", gotExplicit.OwnerID, gotExplicit.Status)
+	}
+}
+
+func TestShareRegistryPreservesRecordsFromOtherProcesses(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "shares.json")
+	registryA, err := NewShareRegistry(path)
+	if err != nil {
+		t.Fatalf("new registry A: %v", err)
+	}
+	registryB, err := NewShareRegistry(path)
+	if err != nil {
+		t.Fatalf("new registry B: %v", err)
+	}
+	now := time.Now().UTC()
+	if err := registryA.Upsert(ShareRecord{
+		ID:        "sh_owner_a",
+		Type:      ShareTypeHTTP,
+		Target:    "localhost:1111",
+		PublicURL: "https://owner-a.example.com",
+		OwnerID:   "owner-a",
+		Status:    ShareStatusActive,
+		CreatedAt: now,
+	}); err != nil {
+		t.Fatalf("upsert owner A: %v", err)
+	}
+	if err := registryB.Upsert(ShareRecord{
+		ID:        "sh_owner_b",
+		Type:      ShareTypeHTTP,
+		Target:    "localhost:2222",
+		PublicURL: "https://owner-b.example.com",
+		OwnerID:   "owner-b",
+		Status:    ShareStatusActive,
+		CreatedAt: now,
+	}); err != nil {
+		t.Fatalf("upsert owner B: %v", err)
+	}
+
+	records := registryA.List()
+	if len(records) != 2 {
+		t.Fatalf("records length = %d, want 2: %#v", len(records), records)
 	}
 }
 
@@ -53,6 +200,7 @@ func TestRestartShareRestoresLostRecordInPlace(t *testing.T) {
 		ShareClientPath:   clientPath,
 		ShareRuntimeDir:   filepath.Join(dir, "runtime"),
 		ShareRegistryFile: filepath.Join(dir, "shares.json"),
+		ShareInstanceID:   "owner-restore",
 		ShareMaxActive:    3,
 	}
 	manager, err := NewShareManager(context.Background(), options)
@@ -60,7 +208,9 @@ func TestRestartShareRestoresLostRecordInPlace(t *testing.T) {
 		t.Fatalf("new share manager: %v", err)
 	}
 	defer manager.Close()
-	manager.SetDefaultTarget("localhost:2222", "/")
+	if err := manager.ConfigureInstance("localhost:2222", "/"); err != nil {
+		t.Fatalf("configure instance: %v", err)
+	}
 
 	lost := ShareRecord{
 		ID:         "sh_restore",
@@ -68,6 +218,7 @@ func TestRestartShareRestoresLostRecordInPlace(t *testing.T) {
 		Target:     "localhost:2222",
 		Subdomain:  "gotty-xtlaat",
 		PublicURL:  "https://gotty-xtlaat.httptunnel.top",
+		OwnerID:    "owner-restore",
 		Status:     ShareStatusLost,
 		CreatedAt:  time.Now().UTC().Add(-time.Minute),
 		LastError:  "gotty restarted before this share was stopped",
@@ -98,7 +249,7 @@ func TestRestartShareRestoresLostRecordInPlace(t *testing.T) {
 	if stored.Status != ShareStatusActive {
 		t.Fatalf("stored status = %q, want %q", stored.Status, ShareStatusActive)
 	}
-	args, err := os.ReadFile(filepath.Join(options.ShareRuntimeDir, lost.ID, "args.txt"))
+	args, err := os.ReadFile(filepath.Join(options.ShareRuntimeDir, "owner-restore", lost.ID, "args.txt"))
 	if err != nil {
 		t.Fatalf("read fake client args: %v", err)
 	}
@@ -107,6 +258,43 @@ func TestRestartShareRestoresLostRecordInPlace(t *testing.T) {
 	}
 	if !strings.Contains(string(args), "--target http://localhost:2222") {
 		t.Fatalf("restart did not use current gotty target: %s", args)
+	}
+}
+
+func TestCreateShareStoresOwnerAndUsesScopedRuntime(t *testing.T) {
+	dir := t.TempDir()
+	clientPath := writeFakeShareClient(t, dir)
+	options := &Options{
+		ShareEnabled:      true,
+		ShareServerURL:    "https://httptunnel.top",
+		ShareClientPath:   clientPath,
+		ShareRuntimeDir:   filepath.Join(dir, "runtime"),
+		ShareRegistryFile: filepath.Join(dir, "shares.json"),
+		ShareInstanceID:   "owner-create",
+		ShareMaxActive:    3,
+	}
+	manager, err := NewShareManager(context.Background(), options)
+	if err != nil {
+		t.Fatalf("new share manager: %v", err)
+	}
+	defer manager.Close()
+	if err := manager.ConfigureInstance("localhost:2222", "/"); err != nil {
+		t.Fatalf("configure instance: %v", err)
+	}
+
+	record, err := manager.CreateShare(shareCreateRequest{Subdomain: "unit"})
+	if err != nil {
+		t.Fatalf("create share: %v", err)
+	}
+	if record.OwnerID != "owner-create" {
+		t.Fatalf("owner id = %q, want owner-create", record.OwnerID)
+	}
+	args, err := os.ReadFile(filepath.Join(options.ShareRuntimeDir, "owner-create", record.ID, "args.txt"))
+	if err != nil {
+		t.Fatalf("read fake client args: %v", err)
+	}
+	if !strings.Contains(string(args), "--target http://localhost:2222") {
+		t.Fatalf("create did not use default target: %s", args)
 	}
 }
 
@@ -119,6 +307,7 @@ func TestRestoreActiveSharesRestartsLostRecordsInPlace(t *testing.T) {
 		ShareClientPath:   clientPath,
 		ShareRuntimeDir:   filepath.Join(dir, "runtime"),
 		ShareRegistryFile: filepath.Join(dir, "shares.json"),
+		ShareInstanceID:   "owner-auto",
 		ShareMaxActive:    3,
 	}
 	manager, err := NewShareManager(context.Background(), options)
@@ -126,7 +315,9 @@ func TestRestoreActiveSharesRestartsLostRecordsInPlace(t *testing.T) {
 		t.Fatalf("new share manager: %v", err)
 	}
 	defer manager.Close()
-	manager.SetDefaultTarget("localhost:2222", "/")
+	if err := manager.ConfigureInstance("localhost:2222", "/"); err != nil {
+		t.Fatalf("configure instance: %v", err)
+	}
 
 	lost := ShareRecord{
 		ID:         "sh_auto_restore",
@@ -134,6 +325,7 @@ func TestRestoreActiveSharesRestartsLostRecordsInPlace(t *testing.T) {
 		Target:     "localhost:2222",
 		Subdomain:  "gotty-auto",
 		PublicURL:  "https://gotty-auto.httptunnel.top",
+		OwnerID:    "owner-auto",
 		Status:     ShareStatusLost,
 		CreatedAt:  time.Now().UTC().Add(-time.Minute),
 		LastError:  "gotty restarted before this share was stopped",
@@ -157,6 +349,109 @@ func TestRestoreActiveSharesRestartsLostRecordsInPlace(t *testing.T) {
 	}
 	if len(manager.registry.List()) != 1 {
 		t.Fatalf("restore should not create a duplicate record: %#v", manager.registry.List())
+	}
+}
+
+func TestRestoreActiveSharesSkipsOtherOwners(t *testing.T) {
+	dir := t.TempDir()
+	clientPath := writeFakeShareClient(t, dir)
+	options := &Options{
+		ShareEnabled:      true,
+		ShareServerURL:    "https://httptunnel.top",
+		ShareClientPath:   clientPath,
+		ShareRuntimeDir:   filepath.Join(dir, "runtime"),
+		ShareRegistryFile: filepath.Join(dir, "shares.json"),
+		ShareInstanceID:   "owner-b",
+		ShareMaxActive:    3,
+	}
+	manager, err := NewShareManager(context.Background(), options)
+	if err != nil {
+		t.Fatalf("new share manager: %v", err)
+	}
+	defer manager.Close()
+	if err := manager.ConfigureInstance("localhost:2222", "/"); err != nil {
+		t.Fatalf("configure instance: %v", err)
+	}
+
+	other := ShareRecord{
+		ID:         "sh_owner_a",
+		Type:       ShareTypeHTTP,
+		Target:     "localhost:1111",
+		Subdomain:  "gotty-owner-a",
+		PublicURL:  "https://gotty-owner-a.httptunnel.top",
+		OwnerID:    "owner-a",
+		Status:     ShareStatusLost,
+		CreatedAt:  time.Now().UTC().Add(-time.Minute),
+		LastError:  "gotty restarted before this share was stopped",
+		IsTerminal: true,
+	}
+	if err := manager.registry.Upsert(other); err != nil {
+		t.Fatalf("upsert other owner: %v", err)
+	}
+
+	manager.restoreActiveShares()
+
+	stored, ok := manager.registry.Get(other.ID)
+	if !ok {
+		t.Fatal("other owner record missing from registry")
+	}
+	if stored.Status != ShareStatusLost {
+		t.Fatalf("other owner status = %q, want lost", stored.Status)
+	}
+	if got := manager.List(); len(got) != 0 {
+		t.Fatalf("manager listed other owner shares: %#v", got)
+	}
+	if _, err := os.Stat(filepath.Join(options.ShareRuntimeDir, "owner-b", other.ID, "args.txt")); !os.IsNotExist(err) {
+		t.Fatalf("other owner share should not be restarted, stat err=%v", err)
+	}
+}
+
+func TestShareManagerRejectsOtherOwnerRecords(t *testing.T) {
+	dir := t.TempDir()
+	options := &Options{
+		ShareEnabled:      true,
+		ShareServerURL:    "https://httptunnel.top",
+		ShareRuntimeDir:   filepath.Join(dir, "runtime"),
+		ShareRegistryFile: filepath.Join(dir, "shares.json"),
+		ShareInstanceID:   "owner-b",
+		ShareMaxActive:    3,
+	}
+	manager, err := NewShareManager(context.Background(), options)
+	if err != nil {
+		t.Fatalf("new share manager: %v", err)
+	}
+	defer manager.Close()
+	if err := manager.ConfigureInstance("localhost:2222", "/"); err != nil {
+		t.Fatalf("configure instance: %v", err)
+	}
+
+	other := ShareRecord{
+		ID:        "sh_owner_a",
+		Type:      ShareTypeHTTP,
+		Target:    "localhost:1111",
+		PublicURL: "https://owner-a.example.com",
+		OwnerID:   "owner-a",
+		Status:    ShareStatusLost,
+		CreatedAt: time.Now().UTC(),
+	}
+	if err := manager.registry.Upsert(other); err != nil {
+		t.Fatalf("upsert other owner: %v", err)
+	}
+
+	if _, ok := manager.GetShare(other.ID); ok {
+		t.Fatal("GetShare returned other owner record")
+	}
+	if _, err := manager.RestartShare(other.ID); err == nil {
+		t.Fatal("RestartShare should reject other owner record")
+	}
+	if _, err := manager.StopShare(other.ID, ShareStatusStopped); err == nil {
+		t.Fatal("StopShare should reject other owner record")
+	}
+	if err := manager.DeleteRecord(other.ID); err == nil {
+		t.Fatal("DeleteRecord should reject other owner record")
+	}
+	if _, ok := manager.registry.Get(other.ID); !ok {
+		t.Fatal("other owner record should remain in registry")
 	}
 }
 

@@ -262,7 +262,9 @@ func (server *Server) Run(ctx context.Context, options ...RunOption) error {
 	}
 	if server.shareManager != nil && len(listeners) > 0 {
 		_, port, _ := net.SplitHostPort(listeners[0].Addr().String())
-		server.shareManager.SetDefaultTarget(net.JoinHostPort("localhost", port), path)
+		if err := server.shareManager.ConfigureInstance(net.JoinHostPort("localhost", port), path); err != nil {
+			return errors.Wrapf(err, "failed to initialize share instance")
+		}
 		if server.options.ShareRestoreActive {
 			server.shareManager.RestoreActiveShares()
 		}

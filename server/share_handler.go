@@ -85,7 +85,7 @@ func (server *Server) handleShareItem(w http.ResponseWriter, r *http.Request) {
 
 	switch {
 	case r.Method == http.MethodGet && action == "":
-		record, ok := server.shareManager.registry.Get(id)
+		record, ok := server.shareManager.GetShare(id)
 		if !ok {
 			writeShareError(w, http.StatusNotFound, "NOT_FOUND", "share not found")
 			return

@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/netip"
@@ -26,6 +27,7 @@ type ShareManager struct {
 	registry      *ShareRegistry
 	active        map[string]activeShare
 	creating      int
+	ownerID       string
 	defaultTarget string
 	defaultPath   string
 	mu            sync.Mutex
@@ -36,9 +38,6 @@ type ShareManager struct {
 func NewShareManager(parent context.Context, options *Options) (*ShareManager, error) {
 	registry, err := NewShareRegistry(options.ShareRegistryFile)
 	if err != nil {
-		return nil, err
-	}
-	if err := registry.MarkStartupState(false); err != nil {
 		return nil, err
 	}
 	ctx, cancel := context.WithCancel(parent)
@@ -84,11 +83,20 @@ func (m *ShareManager) Close() {
 	}
 }
 
-func (m *ShareManager) SetDefaultTarget(target, path string) {
+func (m *ShareManager) ConfigureInstance(target, path string) error {
+	ownerID := resolveShareOwnerID(m.options, target, path)
 	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.ownerID = ownerID
 	m.defaultTarget = target
 	m.defaultPath = path
+	m.mu.Unlock()
+	return m.registry.MarkStartupState(ownerID, target)
+}
+
+func (m *ShareManager) OwnerID() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.ownerID
 }
 
 func (m *ShareManager) DefaultTarget() string {
@@ -98,32 +106,53 @@ func (m *ShareManager) DefaultTarget() string {
 }
 
 func (m *ShareManager) List() []ShareRecord {
+	ownerID := m.OwnerID()
+	if ownerID == "" {
+		return nil
+	}
 	records := m.registry.List()
 	now := time.Now().UTC()
-	for i := range records {
-		if records[i].Status == ShareStatusActive && records[i].ExpiresAt != nil && !records[i].ExpiresAt.After(now) {
-			updated, err := m.registry.Update(records[i].ID, func(record *ShareRecord) {
+	owned := make([]ShareRecord, 0, len(records))
+	for _, record := range records {
+		if record.OwnerID != ownerID {
+			continue
+		}
+		if record.Status == ShareStatusActive && record.ExpiresAt != nil && !record.ExpiresAt.After(now) {
+			updated, err := m.registry.Update(record.ID, func(record *ShareRecord) {
 				record.Status = ShareStatusExpired
 				stoppedAt := now
 				record.StoppedAt = &stoppedAt
 			})
 			if err == nil {
-				records[i] = updated
+				record = updated
 			} else {
-				records[i].Status = ShareStatusExpired
+				record.Status = ShareStatusExpired
 			}
 		}
+		owned = append(owned, record)
 	}
-	sort.Slice(records, func(i, j int) bool {
-		if records[i].Status == ShareStatusActive && records[j].Status != ShareStatusActive {
+	sort.Slice(owned, func(i, j int) bool {
+		if owned[i].Status == ShareStatusActive && owned[j].Status != ShareStatusActive {
 			return true
 		}
-		if records[i].Status != ShareStatusActive && records[j].Status == ShareStatusActive {
+		if owned[i].Status != ShareStatusActive && owned[j].Status == ShareStatusActive {
 			return false
 		}
-		return records[i].CreatedAt.After(records[j].CreatedAt)
+		return owned[i].CreatedAt.After(owned[j].CreatedAt)
 	})
-	return records
+	return owned
+}
+
+func (m *ShareManager) GetShare(id string) (ShareRecord, bool) {
+	ownerID := m.OwnerID()
+	if ownerID == "" {
+		return ShareRecord{}, false
+	}
+	record, ok := m.registry.Get(id)
+	if !ok || record.OwnerID != ownerID {
+		return ShareRecord{}, false
+	}
+	return record, true
 }
 
 func (m *ShareManager) CreateShare(req shareCreateRequest) (ShareRecord, error) {
@@ -139,9 +168,13 @@ func (m *ShareManager) CreateShare(req shareCreateRequest) (ShareRecord, error) 
 	}
 
 	m.mu.Lock()
+	ownerID := m.ownerID
 	defaultTarget := m.defaultTarget
 	defaultPath := m.defaultPath
 	m.mu.Unlock()
+	if ownerID == "" {
+		return ShareRecord{}, fmt.Errorf("share manager is not ready")
+	}
 
 	requestedTarget := strings.TrimSpace(req.Target)
 	isTerminal := requestedTarget == "" || requestedTarget == defaultTarget
@@ -188,7 +221,7 @@ func (m *ShareManager) CreateShare(req shareCreateRequest) (ShareRecord, error) 
 		if err != nil {
 			return ShareRecord{}, err
 		}
-		record, err := m.createShareWithSubdomain(displayTarget, targetURL, subdomain, publicPath, ttlSeconds, expiresAt, isTerminal)
+		record, err := m.createShareWithSubdomain(ownerID, displayTarget, targetURL, subdomain, publicPath, ttlSeconds, expiresAt, isTerminal)
 		if err == nil {
 			return record, nil
 		}
@@ -197,12 +230,15 @@ func (m *ShareManager) CreateShare(req shareCreateRequest) (ShareRecord, error) 
 			break
 		}
 	}
-	return m.saveFailedShare(shareType, displayTarget, "", ttlSeconds, expiresAt, isTerminal, lastErr)
+	return m.saveFailedShare(ownerID, shareType, displayTarget, "", ttlSeconds, expiresAt, isTerminal, lastErr)
 }
 
 func (m *ShareManager) StopShare(id string, status string) (ShareRecord, error) {
 	if status == "" {
 		status = ShareStatusStopped
+	}
+	if _, ok := m.GetShare(id); !ok {
+		return ShareRecord{}, fmt.Errorf("share not found")
 	}
 
 	m.mu.Lock()
@@ -235,6 +271,10 @@ func (m *ShareManager) RestartShare(id string) (ShareRecord, error) {
 func (m *ShareManager) restartShare(id string, ttlOverride int) (ShareRecord, error) {
 	record, ok := m.registry.Get(id)
 	if !ok {
+		return ShareRecord{}, fmt.Errorf("share not found")
+	}
+	ownerID := m.OwnerID()
+	if ownerID == "" || record.OwnerID != ownerID {
 		return ShareRecord{}, fmt.Errorf("share not found")
 	}
 	if record.Status == ShareStatusActive {
@@ -308,7 +348,7 @@ func (m *ShareManager) restartShare(id string, ttlOverride int) (ShareRecord, er
 		return ShareRecord{}, err
 	}
 
-	restarted, err := m.startShareWithID(id, displayTarget, targetURL, subdomain, publicPath, ttlSeconds, expiresAt, isTerminal, now)
+	restarted, err := m.startShareWithID(id, ownerID, displayTarget, targetURL, subdomain, publicPath, ttlSeconds, expiresAt, isTerminal, now)
 	if err != nil {
 		m.markShareRestartFailed(id, err)
 		return ShareRecord{}, err
@@ -317,6 +357,9 @@ func (m *ShareManager) restartShare(id string, ttlOverride int) (ShareRecord, er
 }
 
 func (m *ShareManager) DeleteRecord(id string) error {
+	if _, ok := m.GetShare(id); !ok {
+		return fmt.Errorf("share not found")
+	}
 	m.mu.Lock()
 	_, active := m.active[id]
 	m.mu.Unlock()
@@ -326,11 +369,11 @@ func (m *ShareManager) DeleteRecord(id string) error {
 	return m.registry.Delete(id)
 }
 
-func (m *ShareManager) createShareWithSubdomain(displayTarget, targetURL, subdomain, publicPath string, ttlSeconds int, expiresAt *time.Time, isTerminal bool) (ShareRecord, error) {
-	return m.startShareWithID(randomShareID(), displayTarget, targetURL, subdomain, publicPath, ttlSeconds, expiresAt, isTerminal, time.Now().UTC())
+func (m *ShareManager) createShareWithSubdomain(ownerID, displayTarget, targetURL, subdomain, publicPath string, ttlSeconds int, expiresAt *time.Time, isTerminal bool) (ShareRecord, error) {
+	return m.startShareWithID(randomShareID(), ownerID, displayTarget, targetURL, subdomain, publicPath, ttlSeconds, expiresAt, isTerminal, time.Now().UTC())
 }
 
-func (m *ShareManager) startShareWithID(id, displayTarget, targetURL, subdomain, publicPath string, ttlSeconds int, expiresAt *time.Time, isTerminal bool, createdAt time.Time) (ShareRecord, error) {
+func (m *ShareManager) startShareWithID(id, ownerID, displayTarget, targetURL, subdomain, publicPath string, ttlSeconds int, expiresAt *time.Time, isTerminal bool, createdAt time.Time) (ShareRecord, error) {
 	now := time.Now().UTC()
 	if createdAt.IsZero() {
 		createdAt = now
@@ -341,6 +384,7 @@ func (m *ShareManager) startShareWithID(id, displayTarget, targetURL, subdomain,
 		Target:     displayTarget,
 		Subdomain:  subdomain,
 		TTLSeconds: ttlSeconds,
+		OwnerID:    ownerID,
 		Status:     ShareStatusCreating,
 		CreatedAt:  createdAt,
 		ExpiresAt:  expiresAt,
@@ -355,7 +399,7 @@ func (m *ShareManager) startShareWithID(id, displayTarget, targetURL, subdomain,
 	ctx, cancel := context.WithCancel(m.ctx)
 	tunnel := NewHTTPTunnelClient(HTTPTunnelConfig{
 		ClientPath:  clientPath,
-		RuntimeDir:  m.shareRuntimeDir(id),
+		RuntimeDir:  m.shareRuntimeDirForOwner(ownerID, id),
 		ServerURL:   m.options.ShareServerURL,
 		TargetURL:   targetURL,
 		Subdomain:   subdomain,
@@ -411,13 +455,19 @@ func (m *ShareManager) stopStoredShare(id string) error {
 	if err != nil {
 		return err
 	}
-	tunnel := NewHTTPTunnelClient(HTTPTunnelConfig{
-		ClientPath:  clientPath,
-		RuntimeDir:  m.shareRuntimeDir(id),
-		ServerURL:   m.options.ShareServerURL,
-		CreateToken: m.options.ShareCreateToken,
-	})
-	return tunnel.Stop(context.Background())
+	var errs []error
+	for _, runtimeDir := range m.shareRuntimeDirs(id) {
+		tunnel := NewHTTPTunnelClient(HTTPTunnelConfig{
+			ClientPath:  clientPath,
+			RuntimeDir:  runtimeDir,
+			ServerURL:   m.options.ShareServerURL,
+			CreateToken: m.options.ShareCreateToken,
+		})
+		if err := tunnel.Stop(context.Background()); err != nil && !isMissingStoredTunnelError(err) {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
 }
 
 func (m *ShareManager) runShare(ctx context.Context, id string, tunnel *HTTPTunnelClient) {
@@ -464,7 +514,7 @@ func (m *ShareManager) expireShare(ctx context.Context, id string, expiresAt tim
 	}
 }
 
-func (m *ShareManager) saveFailedShare(shareType, target, subdomain string, ttlSeconds int, expiresAt *time.Time, isTerminal bool, err error) (ShareRecord, error) {
+func (m *ShareManager) saveFailedShare(ownerID, shareType, target, subdomain string, ttlSeconds int, expiresAt *time.Time, isTerminal bool, err error) (ShareRecord, error) {
 	now := time.Now().UTC()
 	message := "failed to create share"
 	if err != nil {
@@ -476,6 +526,7 @@ func (m *ShareManager) saveFailedShare(shareType, target, subdomain string, ttlS
 		Target:     target,
 		Subdomain:  subdomain,
 		TTLSeconds: ttlSeconds,
+		OwnerID:    ownerID,
 		Status:     ShareStatusFailed,
 		CreatedAt:  now,
 		ExpiresAt:  expiresAt,
@@ -492,7 +543,14 @@ func (m *ShareManager) RestoreActiveShares() {
 }
 
 func (m *ShareManager) restoreActiveShares() {
+	ownerID := m.OwnerID()
+	if ownerID == "" {
+		return
+	}
 	for _, record := range m.registry.List() {
+		if record.OwnerID != ownerID {
+			continue
+		}
 		if record.Status != ShareStatusLost {
 			continue
 		}
@@ -513,11 +571,28 @@ func (m *ShareManager) restoreActiveShares() {
 }
 
 func (m *ShareManager) shareRuntimeDir(id string) string {
+	return m.shareRuntimeDirForOwner(m.OwnerID(), id)
+}
+
+func (m *ShareManager) shareRuntimeDirs(id string) []string {
+	current := m.shareRuntimeDir(id)
+	legacy := m.shareRuntimeDirForOwner("", id)
+	if current == legacy {
+		return []string{current}
+	}
+	return []string{current, legacy}
+}
+
+func (m *ShareManager) shareRuntimeDirForOwner(ownerID, id string) string {
 	root := strings.TrimSpace(m.options.ShareRuntimeDir)
 	if root == "" {
 		root = "~/.gotty-http-tunnel"
 	}
-	return filepath.Join(homedir.Expand(root), id)
+	root = homedir.Expand(root)
+	if ownerID == "" {
+		return filepath.Join(root, id)
+	}
+	return filepath.Join(root, ownerID, id)
 }
 
 func restartTarget(record ShareRecord) string {

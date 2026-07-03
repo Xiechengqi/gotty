@@ -39,7 +39,7 @@ func (server *Server) requestSelfRestart(cancel context.CancelFunc) error {
 	if server.selfRestarting {
 		return nil
 	}
-	if err := scheduleSelfRestart(); err != nil {
+	if err := scheduleSelfRestart(server.selfRestartEnv()); err != nil {
 		return err
 	}
 	server.selfRestarting = true
@@ -49,6 +49,16 @@ func (server *Server) requestSelfRestart(cancel context.CancelFunc) error {
 		cancel()
 	}()
 	return nil
+}
+
+func (server *Server) selfRestartEnv() map[string]string {
+	env := make(map[string]string)
+	if server.shareManager != nil {
+		if ownerID := server.shareManager.OwnerID(); ownerID != "" {
+			env[shareOwnerEnv] = ownerID
+		}
+	}
+	return env
 }
 
 func (server *Server) authorizeControlRequest(r *http.Request) bool {
