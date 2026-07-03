@@ -1,907 +1,310 @@
-# ![](https://raw.githubusercontent.com/sorenisanerd/gotty/master/resources/favicon.ico) GoTTY - 将你的终端分享为 Web 应用
+<h4 align="right"><a href="README_EN.md">English</a> | <strong>简体中文</strong></h4>
 
-[![GitHub release](http://img.shields.io/github/release/sorenisanerd/gotty.svg?style=flat-square)][release]
-[![MIT License](http://img.shields.io/badge/license-MIT-blue.svg?style=flat-square)][license]
+<p align="center">
+  <img src="resources/icon.svg" alt="GoTTY icon" width="72" height="72">
+</p>
 
-[release]: https://github.com/sorenisanerd/gotty/releases
-[license]: https://github.com/sorenisanerd/gotty/blob/master/LICENSE
+<h1 align="center">GoTTY</h1>
 
-GoTTY 是一个简单的命令行工具，可以将你的 CLI 工具转换为 Web 应用程序。
+<p align="center"><strong>把本地命令或 Shell 安全发布成可访问、可分享、可自动化控制的 Web 终端。</strong></p>
 
-[原始项目](https://github.com/yudai/gotty) 由 [Iwasaki Yudai](https://github.com/yudai) 创建。
+<p align="center">
+  <img alt="Go" src="https://img.shields.io/badge/Go-1.26-00add8?style=flat-square&logo=go">
+  <img alt="Terminal" src="https://img.shields.io/badge/xterm.js-6.x-111827?style=flat-square">
+  <img alt="Protocol" src="https://img.shields.io/badge/HTTP%20%2F%20WebSocket-terminal-2563eb?style=flat-square">
+  <img alt="Share" src="https://img.shields.io/badge/share-http--tunnel-16a34a?style=flat-square">
+  <img alt="License" src="https://img.shields.io/badge/license-MIT-blue?style=flat-square">
+</p>
 
-![Screenshot](https://raw.githubusercontent.com/sorenisanerd/gotty/master/screenshot.gif)
+GoTTY 是一个单二进制 Web 终端服务。它启动一个本地命令，通过 PTY 连接该命令，并把终端画面、输入、文件传输、REST API、分享管理等能力暴露给浏览器。
+
+本仓库基于 [sorenisanerd/gotty](https://github.com/sorenisanerd/gotty) 和原始 [yudai/gotty](https://github.com/yudai/gotty) 演进，当前重点是稳定的远程终端、可恢复连接、浏览器内管理、HTTP tunnel 分享和自动化控制接口。
+
+典型链路：
+
+```text
+browser
+  -> HTTP / WebSocket
+  -> gotty
+  -> PTY
+  -> local command / shell
+```
+
+公网分享链路：
+
+```text
+https://gotty-<suffix>.httptunnel.top
+  -> http-tunnel server
+  -> persistent WebSocket tunnel
+  -> http-tunnel-client
+  -> http://localhost:<gotty-port>
+  -> gotty
+```
+
+项目只实现 HTTP / WebSocket 层面的 Web 终端和分享，不实现原始 TCP 穿透、SSH 反向转发、多用户/团队权限系统或容器编排平台。
 
 ## 特性
 
-- 🚀 将任意命令行工具转换为 Web 应用
-- 🔒 支持基本认证和 TLS/SSL 加密
-- 🎨 基于 xterm.js 的现代终端界面
-- 📱 响应式设计，支持移动端访问
-- 🎯 支持选中文本自动复制到剪贴板
-- 📁 支持 zmodem 文件传输协议
-- 🔄 支持自动重连
-- ⚡ WebGL 渲染加速
-- 🔌 REST API 支持 — 通过 HTTP 接口模拟键盘输入、执行命令、获取终端输出
-
-## 技术架构
-
-### 系统架构图
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                         客户端 (浏览器)                          │
-├─────────────────────────────────────────────────────────────────┤
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐          │
-│  │   xterm.js   │  │  Bootstrap   │  │   zmodem.js  │          │
-│  │  (终端渲染)   │  │   (UI框架)   │  │  (文件传输)   │          │
-│  └──────┬───────┘  └──────────────┘  └──────┬───────┘          │
-│         │                                    │                  │
-│         └────────────┬───────────────────────┘                  │
-│                      │                                          │
-│              ┌───────▼────────┐                                 │
-│              │   WebSocket    │                                 │
-│              │   Connection   │                                 │
-│              └───────┬────────┘                                 │
-└──────────────────────┼─────────────────────────────────────────┘
-                       │
-                       │ HTTP/WebSocket
-                       │
-┌──────────────────────▼─────────────────────────────────────────┐
-│                     GoTTY 服务器 (Go)                           │
-├─────────────────────────────────────────────────────────────────┤
-│  ┌─────────────────────────────────────────────────────┐        │
-│  │              HTTP Server (Gorilla WebSocket)        │        │
-│  │  ┌──────────┐  ┌──────────┐  ┌──────────┐          │        │
-│  │  │ 静态文件  │  │  认证层   │  │ TLS/SSL  │          │        │
-│  │  └──────────┘  └──────────┘  └──────────┘          │        │
-│  └────────────────────┬────────────────────────────────┘        │
-│                       │                                         │
-│  ┌────────────────────▼────────────────────────┐               │
-│  │           WebSocket Handler                │               │
-│  │  ┌──────────────┐  ┌─────────────────┐     │               │
-│  │  │  输入处理器   │  │   输出处理器     │     │               │
-│  │  │ (键盘/鼠标)   │  │  (终端输出)      │     │               │
-│  │  └──────┬───────┘  └────────▲────────┘     │               │
-│  └─────────┼──────────────────┼────────────────┘               │
-│            │                  │                                │
-│  ┌─────────┼──────────────────┼──────────────────┐             │
-│  │  REST API Layer (可选)                        │             │
-│  │  ┌────────────┐ ┌──────────┐ ┌─────────────┐  │             │
-│  │  │TerminalState│ │  Probe   │ │ ExecManager │  │             │
-│  │  │ (互斥状态机) │ │(环境探测) │ │ (命令执行)  │  │             │
-│  │  └────────────┘ └──────────┘ └─────────────┘  │             │
-│  │  ┌──────────────────────────────────────────┐  │             │
-│  │  │       BroadcastController (广播控制)      │  │             │
-│  │  └──────────────────────────────────────────┘  │             │
-│  └─────────┼──────────────────┼──────────────────┘             │
-│            │                  │                                │
-│  ┌─────────▼──────────────────┴────────────┐                   │
-│  │          PTY (Pseudo Terminal)         │                   │
-│  │      (github.com/creack/pty)           │                   │
-│  └─────────────────┬──────────────────────┘                   │
-└────────────────────┼───────────────────────────────────────────┘
-                     │
-                     │ 进程通信
-                     │
-┌────────────────────▼───────────────────────────────────────────┐
-│                  执行的命令/Shell                               │
-│              (bash, top, vim, 等等)                            │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-### 技术栈
-
-#### 后端 (Go)
-- **Web 框架**: Go 标准库 `net/http`
-- **WebSocket**: `github.com/gorilla/websocket` - 处理 WebSocket 连接
-- **PTY**: `github.com/creack/pty` - 创建伪终端
-- **CLI**: `github.com/urfave/cli/v2` - 命令行参数解析
-- **压缩**: `github.com/NYTimes/gziphandler` - HTTP 响应压缩
-
-#### 前端 (TypeScript + Preact)
-- **终端模拟器**: `xterm.js` v5.3.0 - 全功能的终端模拟器
-  - `xterm-addon-fit` - 终端尺寸自适应
-  - `xterm-addon-web-links` - URL 链接支持
-  - `xterm-addon-webgl` - WebGL 渲染加速
-- **UI 框架**: `bootstrap` v5.3.2 - 界面组件
-- **前端框架**: `preact` v10.19.4 - 轻量级 React 替代方案
-- **文件传输**: `zmodem.js` - zmodem 协议实现
-- **构建工具**:
-  - `webpack` v5 - 模块打包
-  - `typescript` v4.9.5 - 类型检查
-  - `sass` - CSS 预处理
-
-### 工作流程
-
-1. **启动阶段**:
-   - GoTTY 启动 HTTP 服务器
-   - 加载静态资源 (HTML, JS, CSS)
-   - 配置认证和 TLS (如果启用)
-
-2. **连接阶段**:
-   - 客户端访问 GoTTY URL
-   - 浏览器加载前端资源
-   - 建立 WebSocket 连接
-   - GoTTY 创建新的 PTY 并执行指定命令
-
-3. **运行阶段**:
-   - 客户端输入 → WebSocket → GoTTY → PTY → 命令进程
-   - 命令输出 → PTY → GoTTY → WebSocket → xterm.js 渲染
-
-4. **文件传输**:
-   - 检测 zmodem 协议握手信号
-   - 暂停正常终端输出
-   - 通过 zmodem.js 处理文件上传/下载
-   - 完成后恢复正常终端模式
+- 将任意本地命令发布成 Web 终端，例如 `bash`、`top`、`vim`、`python`、运维脚本或交互式 CLI。
+- 默认只读，显式使用 `--permit-write` / `-w` 后才允许浏览器向 PTY 写入输入。
+- 多浏览器客户端共享同一个终端会话，右上角显示连接数，并支持最大连接数限制。
+- xterm.js 前端，支持 WebGL 渲染、链接识别、Unicode、响应式尺寸和移动端恢复。
+- 内置显示设置面板：默认 Nord 主题和 Source Code Pro 字体，支持运行时切换主题、字号和字体并保存到 localStorage。
+- 支持选中文本自动复制到剪贴板，复制成功后显示浏览器内通知。
+- 支持文件上传按钮和 zmodem 文件传输通道。
+- 支持刷新/断线后的自动重连和基于 offset 的终端输出 replay，避免刷新后丢失最近输出。
+- 支持动态 resize 策略：固定尺寸、leader 客户端、median 多客户端中位数，并可配置最小/最大行列。
+- 支持 Basic Auth、TLS、TLS client auth、随机 URL、WebSocket Origin 校验和自定义 favicon。
+- 内置 REST API：模拟输入、执行命令、SSE 流式执行、读取输出行、查询终端状态。
+- API 执行期间会用终端状态机阻塞普通用户输入，避免自动化命令和人工输入互相打断。
+- 支持可选 ASR 语音输入代理，把浏览器语音输入转发给 sherpa-onnx streaming server。
+- 右上角提供 Web restart 按钮，支持 `exec`、`fork`、`exit`、`disabled` 等服务端重启模式。
+- 默认启用 Share Manager，使用 `http-tunnel-client` 创建公网 HTTPS 子域名分享。
+- Share 支持自定义 target、子域名后缀、分钟/小时/天过期时间、只读模式、免密模式和自定义密码模式。
+- Share 记录按 gotty 实例隔离，重启后可恢复未过期 active share，避免多个 gotty 进程互相接管历史。
+- 发布构建可内嵌对应架构的 `http-tunnel-client`；运行时优先使用 `/usr/local/bin/http-tunnel-client`，不存在时解压内嵌版本。
 
 ## 快速开始
 
-### 从 Release 页面安装
+只读发布一个命令：
 
-从 [Releases](https://github.com/sorenisanerd/gotty/releases) 页面下载最新的稳定版本。
-
-### Homebrew 安装
-
-```sh
-brew install sorenisanerd/gotty/gotty
-```
-
-### 基本使用
-
-```sh
-# 启动一个共享的 bash 终端
-gotty bash
-
-# 共享 top 命令
+```bash
 gotty top
-
-# 在指定端口运行
-gotty -p 9000 bash
 ```
 
-打开浏览器访问 `http://localhost:8080` 即可看到终端界面。
+发布可交互 Shell：
 
-## 编译部署
-
-### 环境要求
-
-- **Go**: 1.16 或更高版本
-- **Node.js**: 14.0 或更高版本
-- **npm**: 6.0 或更高版本
-- **Make**: GNU Make
-
-### 本地编译
-
-#### 1. 克隆仓库
-
-```sh
-git clone https://github.com/sorenisanerd/gotty.git
-cd gotty
+```bash
+gotty -w bash
 ```
 
-#### 2. 安装前端依赖
+指定监听端口：
 
-```sh
-cd js
-npm install
-cd ..
+```bash
+gotty -w -p 9000 bash
 ```
 
-#### 3. 构建项目
+加 Basic Auth：
 
-```sh
-# 构建生产版本
-make
-
-# 构建开发版本（包含调试信息）
-DEV=1 make
+```bash
+gotty -w -p 9000 -c user:pass bash
 ```
 
-构建完成后，会生成 `gotty` 可执行文件。
+浏览器打开：
 
-#### 4. 验证构建
-
-```sh
-./gotty --version
+```text
+http://localhost:8080
 ```
 
-### 详细构建过程
+常用安全组合：
 
-#### 前端构建
-
-```sh
-# 进入前端目录
-cd js
-
-# 安装依赖
-npm install
-
-# 开发模式构建（未压缩）
-npx webpack --mode=development
-
-# 生产模式构建（压缩优化）
-npx webpack --mode=production
-
-cd ..
+```bash
+gotty \
+  --permit-write \
+  --credential user:pass \
+  --random-url \
+  --max-connection 3 \
+  bash
 ```
 
-前端构建产物位于 `bindata/static/` 目录：
-- `js/gotty.js` - 打包后的 JavaScript
-- `js/gotty.js.map` - Source Map
-- `css/` - 样式文件
-- `index.html` - 主页面
+`--credential` 会启用 Basic Auth。生产环境公开访问时建议至少使用认证、HTTPS 或受控内网入口。
 
-#### 后端构建
+## Share Manager
 
-```sh
-# 设置构建标签
-export VERSION=$(git describe --tags)
+GoTTY 默认启用分享管理：
 
-# 构建二进制文件
-go build -ldflags "-X main.Version=${VERSION}"
-
-# 或使用 make
-make gotty
+```bash
+gotty -w -p 8080 bash
 ```
 
-#### 交叉编译
+打开页面后点击右上角连接数按钮，进入 Share Manager。默认 target 会填入：
 
-```sh
-# Linux AMD64
-GOOS=linux GOARCH=amd64 go build -ldflags "-X main.Version=${VERSION}" -o gotty-linux-amd64
-
-# Linux ARM64
-GOOS=linux GOARCH=arm64 go build -ldflags "-X main.Version=${VERSION}" -o gotty-linux-arm64
-
-# macOS AMD64
-GOOS=darwin GOARCH=amd64 go build -ldflags "-X main.Version=${VERSION}" -o gotty-darwin-amd64
-
-# macOS ARM64 (Apple Silicon)
-GOOS=darwin GOARCH=arm64 go build -ldflags "-X main.Version=${VERSION}" -o gotty-darwin-arm64
-
-# Windows AMD64
-GOOS=windows GOARCH=amd64 go build -ldflags "-X main.Version=${VERSION}" -o gotty-windows-amd64.exe
+```text
+localhost:<gotty实际监听端口>
 ```
 
-### Docker 部署
+创建 share 后会得到类似地址：
 
-#### 使用 Dockerfile 构建
-
-```sh
-# 构建镜像
-docker build -t gotty:latest .
-
-# 运行容器
-docker run -p 8080:8080 gotty:latest bash
+```text
+https://gotty-abcxyz.httptunnel.top
 ```
 
-#### 创建受限环境
+创建参数：
 
-```sh
-# 为每个客户端创建独立的 Docker 容器
-gotty -w docker run -it --rm busybox
+- `Target`：要暴露的本地 HTTP 服务，默认是当前 gotty，例如 `localhost:8080`。
+- `Subdomain suffix`：用户自定义后缀；实际子域名固定使用 `gotty-<suffix>`。留空时自动生成 6 位小写字母。
+- `Expiry`：正整数，单位支持 minutes、hours、days；留空表示永不过期。
+- `Read only`：打开 share URL 后只能查看终端，不能输入、上传、清历史、重启或继续管理 share。
+- `Passwordless`：打开 share URL 不需要 gotty 原始密码。
+- `Custom password`：打开 share URL 只需要输入分享密码，不需要用户名。
+
+相关配置：
+
+```bash
+gotty \
+  --share-enabled \
+  --share-server-url https://httptunnel.top \
+  --share-max-active 3 \
+  --share-runtime-dir ~/.gotty-http-tunnel \
+  --share-registry-file ~/.gotty-shares.json \
+  -w bash
 ```
 
-### 生产部署建议
-
-#### 1. 使用 Systemd 服务
-
-创建 `/etc/systemd/system/gotty.service`:
-
-```ini
-[Unit]
-Description=GoTTY Service
-After=network.target
-
-[Service]
-Type=simple
-User=gotty
-Group=gotty
-WorkingDirectory=/opt/gotty
-ExecStart=/opt/gotty/gotty --config /etc/gotty/config bash
-Restart=on-failure
-RestartSec=5
-
-# 安全加固
-NoNewPrivileges=true
-PrivateTmp=true
-ProtectSystem=strict
-ProtectHome=true
-ReadWritePaths=/var/log/gotty
-
-[Install]
-WantedBy=multi-user.target
-```
-
-启动服务:
-
-```sh
-sudo systemctl enable gotty
-sudo systemctl start gotty
-sudo systemctl status gotty
-```
-
-#### 2. 配置文件
-
-创建 `~/.gotty` 或 `/etc/gotty/config`:
-
-```hcl
-// 监听地址和端口
-address = "0.0.0.0"
-port = "8080"
-
-// 启用 TLS
-enable_tls = true
-tls_crt_file = "/etc/gotty/certs/server.crt"
-tls_key_file = "/etc/gotty/certs/server.key"
-
-// 基本认证
-credential = "username:password"
-
-// 随机 URL (增加安全性)
-random_url = true
-random_url_length = 16
-
-// 客户端设置
-permit_write = true
-enable_reconnect = true
-reconnect_time = 10
-history_replay_bytes = 524288
-max_connection = 10
-
-// 终端设置
-enable_webgl = true
-
-// REST API（认证复用 credential 参数，默认 token 为 user:pass）
-enable_api = true
-```
-
-#### 3. Nginx 反向代理
-
-```nginx
-server {
-    listen 80;
-    server_name gotty.example.com;
-
-    # 重定向到 HTTPS
-    return 301 https://$server_name$request_uri;
-}
-
-server {
-    listen 443 ssl http2;
-    server_name gotty.example.com;
-
-    ssl_certificate /etc/nginx/certs/gotty.crt;
-    ssl_certificate_key /etc/nginx/certs/gotty.key;
-
-    location / {
-        proxy_pass http://localhost:8080;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-
-        # WebSocket 超时设置
-        proxy_read_timeout 86400;
-    }
-}
-```
-
-#### 4. 生成 TLS 证书
-
-```sh
-# 自签名证书（测试用）
-openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
-  -keyout ~/.gotty.key -out ~/.gotty.crt
-
-# Let's Encrypt（生产环境推荐）
-certbot certonly --standalone -d gotty.example.com
-```
-
-## 配置选项
-
-### 命令行参数
-
-```sh
-# 网络设置
---address, -a       监听地址 (默认: "0.0.0.0")
---port, -p          端口号 (默认: "8080")
---path, -m          基础路径 (默认: "/")
-
-# 安全选项
---permit-write, -w          允许客户端写入 TTY（小心使用）
---credential, -c            基本认证凭证 (格式: user:pass)
---random-url, -r            生成随机 URL
---random-url-length         随机 URL 长度 (默认: 8)
---tls, -t                   启用 TLS/SSL
---tls-crt                   TLS 证书文件路径
---tls-key                   TLS 密钥文件路径
---tls-ca-crt                客户端证书 CA 文件
-
-# 连接选项
---max-connection            最大连接数 (0=无限制)
---once                      只接受一个客户端，断开后退出
---timeout                   等待客户端超时秒数 (0=禁用)
---reconnect                 启用重连
---reconnect-time            重连时间间隔 (默认: 10)
---history-replay-bytes      刷新/重连时回放的终端历史字节数 (默认: 524288, 0=全部缓冲历史)
-
-# 终端选项
---width                     静态终端宽度 (0=动态调整)
---height                    静态终端高度 (0=动态调整)
---enable-webgl              启用 WebGL 渲染 (默认: true)
-
-# 其他选项
---title-format              浏览器标题格式
---permit-arguments          允许 URL 参数传递命令参数
---config                    配置文件路径 (默认: "~/.gotty")
---quiet                     静默模式
-
-# API 选项
---enable-api                启用 REST API (默认: false)
---api-probe-timeout         Shell 探测超时毫秒数 (默认: 500)
---api-user-idle-ms          用户空闲超时毫秒数，用于 API 互斥 (默认: 2000)
---api-exec-timeout          API 命令执行超时秒数 (默认: 30)
-```
-
-### 环境变量
-
-所有命令行参数都可以通过环境变量设置，格式为 `GOTTY_<OPTION>`：
-
-```sh
-export GOTTY_PORT=9000
-export GOTTY_CREDENTIAL=admin:secret
-export GOTTY_ENABLE_TLS=true
-gotty bash
-```
+Share 只支持 HTTP / WebSocket 服务，不支持原始 TCP 穿透。http-tunnel server 默认是 `https://httptunnel.top`。
 
 ## REST API
 
-GoTTY 提供 REST API，允许通过 HTTP 接口控制终端。API 执行的命令会同步显示在 Web 终端中，命令行前方带有橙色 `[API]` 标记以区分手动输入。
+API 默认关闭。启用后使用 Bearer token 认证；token 为 `--credential` 的值，未设置 credential 时默认是 `user:pass`。
 
-### 启用 API
-
-```sh
-# 启用 API（需要同时启用写入权限）
-gotty -w --enable-api bash
-
-# 启用 API 并自定义认证凭证
-gotty -w --enable-api --credential="admin:secret" bash
+```bash
+gotty --enable-api --permit-write --credential user:pass bash
 ```
 
-### 认证
+常用接口：
 
-API 认证与 `--credential` 参数联动：
+| 方法 | 路径 | 作用 |
+| --- | --- | --- |
+| `POST` | `/api/v1/input` | 写入文本、单键或 Ctrl 组合键 |
+| `POST` | `/api/v1/exec` | 执行命令并返回 JSON 结果 |
+| `POST` | `/api/v1/exec/stream` | 通过 SSE 流式返回执行事件 |
+| `GET` | `/api/v1/output/lines?n=50` | 读取最近输出行，可用 `strip_ansi=true` 去除 ANSI |
+| `GET` | `/api/v1/status` | 查询终端状态、连接数和当前尺寸 |
 
-- **设置了 `--credential`**：API token 即为 credential 值（如 `admin:secret`）
-- **未设置 `--credential`**：API token 默认为 `user:pass`
+示例：
 
-所有 API 请求必须携带令牌：
-
-```sh
-# Authorization Header（唯一支持方式）
-curl -H "Authorization: Bearer user:pass" http://localhost:8080/api/v1/status
+```bash
+curl -H 'Authorization: Bearer user:pass' \
+  http://127.0.0.1:8080/api/v1/status
 ```
 
-### 互斥机制
+写入文本：
 
-API 执行遵循严格的互斥规则：
-
-- API 禁止并发执行，同一时间只能有一个 API 命令在运行
-- API 和 Web 用户手动输入不能并发 — 如果用户正在操作终端，API 请求会立即拒绝（不排队）
-- API 执行期间，Web 终端的用户输入会被阻止，页面顶部显示"API 执行中"指示器
-- 每次 API 执行前会自动探测 Shell 环境，如果终端处于交互程序中（vim、tmux、mysql 等），API 会拒绝执行
-
-### 请求限制
-
-| 限制项 | 值 | 说明 |
-|--------|-----|------|
-| 命令最大长度 | 8192 字节 | 超出返回 400 |
-| 超时上限 | 600 秒 (10 分钟) | 请求中 `timeout` 字段不可超过此值 |
-
-### API 端点
-
-#### GET /api/v1/status
-
-获取终端当前状态。
-
-```sh
-curl -H "Authorization: Bearer user:pass" http://localhost:8080/api/v1/status
+```bash
+curl -X POST \
+  -H 'Authorization: Bearer user:pass' \
+  -H 'Content-Type: application/json' \
+  -d '{"type":"text","data":"echo hello\n"}' \
+  http://127.0.0.1:8080/api/v1/input
 ```
 
-响应示例：
+执行命令：
 
-```json
-{
-  "state": "idle",
-  "connected_clients": 2,
-  "terminal_size": {"cols": 120, "rows": 35},
-  "details": {
-    "state": "idle",
-    "last_user_input": "2025-01-01T12:00:00Z",
-    "idle_ms": 5000
-  }
+```bash
+curl -X POST \
+  -H 'Authorization: Bearer user:pass' \
+  -H 'Content-Type: application/json' \
+  -d '{"command":"pwd","timeout":10}' \
+  http://127.0.0.1:8080/api/v1/exec
+```
+
+## 配置文件
+
+默认配置路径是 `~/.gotty`，也可以用 `--config` 或 `GOTTY_CONFIG` 指定。命令行 flag 对应环境变量采用 `GOTTY_` 前缀，例如 `--permit-write` 对应 `GOTTY_PERMIT_WRITE`。
+
+示例：
+
+```hcl
+address = "0.0.0.0"
+port = "8080"
+permit_write = true
+enable_basic_auth = true
+credential = "user:pass"
+enable_reconnect = true
+history_replay_bytes = 524288
+resize_policy = "leader"
+restart_mode = "exec"
+
+preferences {
+  theme = "nord"
+  font_family = "'Source Code Pro', monospace"
+  font_size = 14
+  cursor_style = "block"
+  cursor_blink = true
+  scrollback_lines = 5000
 }
 ```
 
-`state` 取值：`idle`（空闲）、`user_active`（用户活跃）、`api_executing`（API 执行中）。
-
-#### POST /api/v1/input
-
-模拟键盘输入。支持文本、特殊键和 Ctrl 组合键。
-
-```sh
-# 输入文本
-curl -X POST -H "Authorization: Bearer user:pass" \
-  http://localhost:8080/api/v1/input \
-  -d '{"type":"text","data":"ls -la"}'
-
-# 按回车
-curl -X POST -H "Authorization: Bearer user:pass" \
-  http://localhost:8080/api/v1/input \
-  -d '{"type":"key","data":"enter"}'
-
-# Ctrl+C
-curl -X POST -H "Authorization: Bearer user:pass" \
-  http://localhost:8080/api/v1/input \
-  -d '{"type":"ctrl","data":"c"}'
-```
-
-支持的 `type` 值：
-
-| type | data | 说明 |
-|------|------|------|
-| `text` | 任意字符串 | 直接输入文本 |
-| `key` | `enter`, `tab`, `backspace`, `escape`, `up`, `down`, `left`, `right`, `home`, `end`, `delete`, `space` | 特殊键 |
-| `ctrl` | `a`-`z` | Ctrl 组合键 |
-
-#### POST /api/v1/exec
-
-执行命令并等待完成，返回完整结果。命令会在 Web 终端中可见，并带有 `[API]` 前缀标记。`output` 字段返回终端过程文本（包含提示符、命令回显、命令输出），但会移除内部 marker 行。
-
-```sh
-curl -X POST -H "Authorization: Bearer user:pass" \
-  http://localhost:8080/api/v1/exec \
-  -d '{"command":"ls -la","timeout":10}'
-```
-
-响应示例：
-
-```json
-{
-  "exec_id": "exec_a1b2c3d4",
-  "command": "ls -la",
-  "exit_code": 0,
-  "output": "total 48\ndrwxr-xr-x 12 user user 4096 ...",
-  "duration_ms": 150,
-  "timed_out": false
-}
-```
-
-错误响应（终端忙）：
-
-```json
-{"code": "TERMINAL_BUSY", "message": "terminal is in use by user (last input 500ms ago)"}
-```
-
-错误响应（探测失败）：
-
-```json
-{"code": "PROBE_FAILED", "message": "probe timeout (500ms) — terminal may be in an interactive application (vim, less, etc.)"}
-```
-
-#### POST /api/v1/exec/stream
-
-执行命令并通过 SSE (Server-Sent Events) 流式返回输出。
-
-```sh
-curl -X POST -H "Authorization: Bearer user:pass" \
-  http://localhost:8080/api/v1/exec/stream \
-  -d '{"command":"ping -c 3 localhost","timeout":30}'
-```
-
-SSE 事件流：
-
-```
-event: started
-data: {"type":"started","exec_id":"exec_a1b2c3d4","command":"ping -c 3 localhost"}
-
-event: output
-data: {"type":"output","content":"PING localhost (127.0.0.1) 56(84) bytes of data.\n"}
-
-event: output
-data: {"type":"output","content":"64 bytes from localhost: icmp_seq=1 ttl=64 time=0.025 ms\n"}
-
-event: completed
-data: {"type":"completed","exec_id":"exec_a1b2c3d4","exit_code":0,"duration_ms":3012}
-```
-
-#### GET /api/v1/output/lines
-
-获取终端最近 N 行输出。
-
-```sh
-# 获取最近 20 行
-curl -H "Authorization: Bearer user:pass" \
-  "http://localhost:8080/api/v1/output/lines?n=20"
-
-# 获取最近 20 行，去除 ANSI 转义序列
-curl -H "Authorization: Bearer user:pass" \
-  "http://localhost:8080/api/v1/output/lines?n=20&strip_ansi=true"
-```
-
-响应示例：
-
-```json
-{
-  "lines": ["user@host:~$ ls", "file1.txt  file2.txt", "user@host:~$"],
-  "total": 3
-}
-```
-
-参数：
-
-| 参数 | 默认值 | 说明 |
-|------|--------|------|
-| `n` | `50` | 返回行数，最大 1000 |
-| `strip_ansi` | `false` | 设为 `true` 去除 ANSI 颜色/控制序列 |
-
-### API 配置参数
-
-| 参数 | 默认值 | 说明 |
-|------|--------|------|
-| `--enable-api` | `false` | 启用 REST API |
-| `--api-probe-timeout` | `500` | Shell 探测超时（毫秒），超时则认为终端处于交互程序中 |
-| `--api-user-idle-ms` | `2000` | 用户空闲判定超时（毫秒），用户最后输入超过此时间后状态回到 idle |
-| `--api-exec-timeout` | `30` | 命令执行默认超时（秒），可在请求中通过 `timeout` 字段覆盖（上限 600s） |
-
-## 安全建议
-
-### 1. 限制输入
-
-默认情况下，GoTTY 不允许客户端发送键盘输入。如果需要交互，建议使用 tmux 或 screen：
-
-```sh
-# 使用 tmux 共享会话
-gotty tmux new -A -s shared
-
-# 从本地连接到同一会话
-tmux attach -t shared
-```
-
-### 2. 启用认证
-
-```sh
-# 基本认证
-gotty -c username:password bash
-
-# 结合 TLS 使用
-gotty -t -c username:password bash
-```
-
-### 3. 使用 TLS/SSL
-
-```sh
-# 使用自签名证书
-gotty -t bash
-
-# 指定证书路径
-gotty --tls --tls-crt=/path/to/cert.crt --tls-key=/path/to/cert.key bash
-```
-
-### 4. 限制访问
-
-```sh
-# 使用随机 URL
-gotty -r bash
-
-# 限制连接数
-gotty --max-connection=1 bash
-
-# 单次连接后退出
-gotty --once bash
-```
-
-### 5. WebSocket Origin 验证
-
-```sh
-# 只允许特定来源的 WebSocket 连接
-gotty --ws-origin='https://example.com' bash
-```
-
-## 使用场景
-
-### 1. 远程系统监控
-
-```sh
-gotty -t -c admin:secret top
-```
-
-### 2. 在线演示
-
-```sh
-gotty -r tmux new -A -s demo
-```
-
-### 3. 教学和培训
-
-```sh
-gotty --permit-write -r bash
-```
-
-### 4. 服务器管理
-
-```sh
-gotty -t -c admin:secret tmux new -A -s admin
-```
-
-### 5. 容器化应用调试
-
-```sh
-gotty -w docker run -it --rm ubuntu bash
-```
-
-## 多客户端共享
-
-### 使用 Tmux
-
-```sh
-# 创建新会话
-gotty tmux new -A -s gotty top
-
-# 本地连接同一会话
-tmux attach -t gotty
-```
-
-### 使用 Screen
-
-```sh
-# 创建新会话
-screen -S mysession
-
-# 在另一个终端启动 gotty
-gotty screen -x mysession
-```
-
-### Tmux 快捷键配置
-
-在 `~/.tmux.conf` 中添加：
-
-```
-# 使用 Ctrl+t 启动 GoTTY 共享当前会话
-bind-key C-t new-window "gotty tmux attach -t `tmux display -p '#S'`"
-```
-
-## 故障排除
-
-### 1. WebSocket 连接失败
-
-- 检查防火墙设置
-- 确认 WebSocket 没有被代理服务器阻止
-- 使用浏览器开发者工具查看网络请求
-
-### 2. TLS 证书错误
-
-```sh
-# Safari 用户需要先访问 HTTPS 页面接受证书
-# 或使用 Let's Encrypt 等受信任的证书
-```
-
-### 3. 终端显示异常
-
-- 尝试禁用 WebGL: `gotty --enable-webgl=false bash`
-- 清除浏览器缓存
-- 更新浏览器到最新版本
-
-### 4. 构建失败
-
-```sh
-# 清理构建缓存
-make clean
-rm -rf js/node_modules
-cd js && npm install && cd ..
+## 关键配置
+
+| 领域 | 配置 |
+| --- | --- |
+| 监听入口 | `address`、`port`、`path`、`random-url`、`random-url-length` |
+| 写入和连接 | `permit-write`、`max-connection`、`once`、`timeout`、`permit-arguments`、`pass-headers` |
+| 安全 | `credential`、`tls`、`tls-crt`、`tls-key`、`tls-ca-crt`、`ws-origin` |
+| 重连和回放 | `reconnect`、`reconnect-time`、`history-replay-bytes`、`ping-interval` |
+| 终端尺寸 | `width`、`height`、`resize-policy`、`min-cols`、`max-cols`、`min-rows`、`max-rows`、`leader-select`、`leader-switch` |
+| 显示偏好 | `preferences.theme`、`font_size`、`font_family`、`cursor_style`、`scrollback_lines`、`alt_is_meta` |
+| API | `enable-api`、`api-probe-timeout`、`api-user-idle-ms`、`api-exec-timeout` |
+| ASR | `enable-asr`、`asr-backend`、`asr-hold-ms`、`asr-hotkey` |
+| Web 重启 | `restart-mode` |
+| 分享 | `share-enabled`、`share-server-url`、`share-client-path`、`share-runtime-dir`、`share-registry-file`、`share-instance-id`、`share-restore-active`、`share-max-active` |
+| 命令进程 | `close-signal`、`close-timeout` |
+
+## 构建
+
+开发构建需要 Go、Node.js、npm 和 GNU Make。前端构建产物会写入 `bindata/static/`，Go binary 会嵌入这些资源。
+
+```bash
+cd js
+npm install
+cd ..
 make
 ```
 
-## 开发
+开发模式：
 
-### 项目结构
-
-```
-gotty/
-├── main.go              # 程序入口
-├── server/             # HTTP/WebSocket 服务器
-│   ├── server.go       # 服务器核心与路由注册
-│   ├── api_handler.go  # REST API 端点处理
-│   ├── exec_manager.go # API 命令执行与 marker 检测
-│   ├── probe.go        # Shell 环境探测（静默）
-│   ├── terminal_state.go # 终端状态机与互斥锁
-│   ├── broadcast_controller.go # 广播暂停控制（探测隐藏）
-│   ├── client_handler.go # WebSocket 客户端输入处理
-│   ├── session_manager.go # 会话管理与多客户端广播
-│   ├── slave_reader.go # PTY 输出读取与分发
-│   ├── history_buffer.go # 终端输出历史缓冲
-│   └── options.go      # 配置选项定义与校验
-├── webtty/             # WebTTY 核心逻辑
-├── backend/            # 后端接口定义
-├── js/                 # 前端源代码
-│   ├── src/
-│   │   ├── main.ts     # 前端入口
-│   │   ├── xterm.tsx   # 终端组件（含 API 执行指示器）
-│   │   ├── zmodem.tsx  # 文件传输
-│   │   └── webtty.tsx  # WebSocket 通信（含 API 通知处理）
-│   ├── package.json
-│   └── webpack.config.js
-├── resources/          # 静态资源
-├── bindata/           # 打包后的静态文件
-└── build.sh           # 构建脚本
-```
-
-### 开发环境设置
-
-```sh
-# 1. 克隆仓库
-git clone https://github.com/sorenisanerd/gotty.git
-cd gotty
-
-# 2. 安装依赖
-cd js && npm install && cd ..
-
-# 3. 开发模式构建
+```bash
 DEV=1 make
-
-# 4. 运行
-./gotty bash
 ```
 
-### 前端开发
+发布工作流会为 Linux amd64 / arm64 下载对应的 `http-tunnel-client`，放入 `server/http_tunnel_client_bin/http-tunnel-client`，再嵌入 gotty binary。
 
-```sh
-cd js
+## 本地验证
 
-# 监听文件变化自动构建
-npx webpack --watch --mode=development
+开发或发布前建议执行：
 
-# 生产构建
-npx webpack --mode=production
+```bash
+go test ./...
+go build ./...
+cd js && npx tsc --noEmit
+cd js && npx webpack --mode=production
+git diff --check
 ```
 
-### 代码贡献
+基础 smoke：
 
-欢迎提交 Pull Request！请确保：
+```bash
+gotty -w -p 8080 bash
+curl http://127.0.0.1:8080/config.js
+curl -H 'Authorization: Bearer user:pass' http://127.0.0.1:8080/api/v1/status
+```
 
-1. 代码通过 `go fmt` 格式化
-2. 前端代码通过 TypeScript 类型检查
-3. 添加必要的测试
-4. 更新相关文档
+## 文件和运行态
 
-## 许可证
+| 路径 | 用途 |
+| --- | --- |
+| `~/.gotty` | 默认 HCL 配置文件 |
+| `~/.gotty-http-tunnel` | Share Manager 的 http-tunnel-client 运行态目录 |
+| `~/.gotty-shares.json` | share 历史、状态、owner 和访问模式记录 |
+| `bindata/static/` | 嵌入 gotty binary 的前端静态资源 |
+| `server/http_tunnel_client_bin/` | 发布构建时内嵌 http-tunnel-client 的位置 |
 
-MIT License
+## 安全说明
 
-## 致谢
+- `--permit-write` 会允许浏览器控制你的 PTY，请只在可信网络或认证保护下开启。
+- `--credential` 使用 Basic Auth，也会作为 REST API Bearer token；公开 API 时请设置强密码。
+- Share 的 `Passwordless` 会绕过 gotty 原始密码；拿到非只读 share URL 的访问者可以按当前策略使用 Share Manager。
+- Share 的自定义密码只保护该 share URL；通过密码后同样不是独立的多用户权限边界。
+- 只读 share 会禁用输入、上传、清历史、重启、ASR 和 share 管理。
+- 使用 `--pass-headers` 会把 HTTP headers 传给被启动命令的环境变量，请避免把敏感 header 泄露给不可信命令。
+- 公开部署建议放在 HTTPS 之后，并设置 `--ws-origin` 限制 WebSocket 来源。
 
-本项目基于 [Iwasaki Yudai](https://github.com/yudai) 的[原始 GoTTY 项目](https://github.com/yudai/gotty)。
+## 项目文件
 
-感谢所有[贡献者](https://github.com/sorenisanerd/gotty/graphs/contributors)的付出！
+- [NEWS.md](NEWS.md)：主要变更记录。
+- [API_PLAN.md](API_PLAN.md)：REST API 设计背景。
+- [LICENSE](LICENSE)：MIT License。
 
-## 相关项目
+## License
 
-### 客户端工具
-
-- [gotty-client](https://github.com/moul/gotty-client) - 从终端连接到 GoTTY 服务器
-
-### 类似项目
-
-- [ttyd](https://tsl0922.github.io/ttyd) - C 语言实现，支持 CJK 和 IME
-- [Wetty](https://github.com/krishnasrinivas/wetty) - 基于 Node.js 的 Web 终端
-- [Secure Shell (Chrome)](https://chrome.google.com/webstore/detail/secure-shell/pnhechapfaindjhompbnflcldabbghjo) - Chrome SSH 客户端
-
-### 终端共享
-
-- [tmate](http://tmate.io/) - 基于 Tmux 的终端共享
-- [termshare](https://termsha.re) - 通过 HTTP 服务器共享终端
+MIT
