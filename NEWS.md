@@ -1,3 +1,11 @@
+## Fork updates (unreleased)
+
+* Integrate selected upstream changes through `cc95e7f`: ZMODEM browser imports and cancellation recovery, HTTP 503 for connection limits, font refitting, mobile special keys and configurable close confirmation.
+* Preserve the fork's sharing permissions, toolbar, API, reconnect replay and voice input. Read-only shares do not expose mobile keys or writable controls.
+* Add Vitest and Playwright coverage; upgrade to Node 24, TypeScript 7, esbuild-loader and Preact 11; remove unused dependencies.
+* Require shared validation before releases, check embedded assets and license inventories, and embed the correct tunnel client in Linux amd64/arm64 binaries and Docker images.
+* Fix a registration-ready channel race and cancel the server context on startup failures.
+
 ##  v1.7.0 (unreleased)
 
 * Add `preferences { alt_is_meta = true }` — restores hterm's Alt-as-Meta key

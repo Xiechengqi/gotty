@@ -8,7 +8,11 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
+  validate:
+    uses: ./.github/workflows/main.yaml
+
   pre-release-docker:
+    needs: validate
     name: "Pre Release Docker"
     runs-on: "ubuntu-latest"
     steps:
@@ -38,7 +42,7 @@ jobs:
     - name: "Build and push docker image"
       uses: docker/build-push-action@v7
       with:
-        platforms: linux/amd64,linux/arm/v7,linux/arm64
+        platforms: linux/amd64,linux/arm64
         push: ${{ !env.ACT }}
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}

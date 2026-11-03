@@ -350,6 +350,8 @@ export class GoTTYXterm {
     private lastCopyNotificationAt: number = 0;
     private readOnly: boolean;
     altIsMeta: boolean = false;
+    private inputTransformer: ((data: string) => string) | null = null;
+    private mobileViewportManaged = false;
 
     constructor(elem: HTMLElement, preferences: Record<string, unknown> = {}, options: GoTTYXtermOptions = {}) {
         this.elem = elem;
@@ -550,6 +552,7 @@ export class GoTTYXterm {
         };
 
         this.term.open(elem);
+        this.term.textarea?.setAttribute("autocomplete", "off");
 
         try {
             this.term.loadAddon(new WebglAddon());
@@ -566,7 +569,9 @@ export class GoTTYXterm {
         window.addEventListener("resize", this.resizeListener);
         window.addEventListener("orientationchange", this.resizeListener);
         if (window.visualViewport) {
-            this.viewportResizeListener = () => this.scheduleFit();
+            this.viewportResizeListener = () => {
+                if (!this.mobileViewportManaged) this.scheduleFit();
+            };
             window.visualViewport.addEventListener("resize", this.viewportResizeListener);
         }
     };
@@ -814,10 +819,22 @@ export class GoTTYXterm {
         });
     }
 
+    fit(): void {
+        this.scheduleFit();
+    }
+
+    refit(): void {
+        this.scheduleFit();
+    }
+
+    setInputTransformer(fn: ((data: string) => string) | null): void {
+        this.inputTransformer = fn;
+        this.mobileViewportManaged = fn !== null;
+    }
+
     private fitTerminal(): void {
         // Fit terminal size to the container so the viewport can reach the bottom.
         this.fitAddOn.fit();
-        this.term.scrollToBottom();
     }
 
     info(): { columns: number, rows: number } {
@@ -1055,6 +1072,8 @@ export class GoTTYXterm {
                 }
                 input = filtered;
             }
+            input = this.inputTransformer ? this.inputTransformer(input) : input;
+            if (input === "") return;
             this.inputCallbacks.forEach((cb) => cb());
             this.toServer(this.encoder.encode(input));
         });

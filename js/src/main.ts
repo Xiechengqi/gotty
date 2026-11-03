@@ -5,9 +5,13 @@ import { createIdleAlert } from "./idle-alert";
 import { installFaviconAlert } from "./favicon-alert";
 import { VoiceInput } from "./voice-input";
 import { initThemePicker } from "./theme-picker";
+import { initMobileKeys, disposeMobileKeys } from "./mobile-keys";
+import { createConfirmClose } from "./confirm-close";
 import { initShareManager } from "./share-manager";
 
 // @TODO remove these
+declare var gotty_confirm_close: boolean;
+declare var gotty_mobile_keys: boolean;
 declare var gotty_auth_token: string;
 declare var gotty_term: string;
 declare var gotty_ws_query_args: string;
@@ -32,7 +36,7 @@ function getCookie(name: string): string | null {
     return null;
 }
 
-function waitForServerRestart(term: GoTTYXterm, basePath: string): void {
+function waitForServerRestart(term: GoTTYXterm, basePath: string, beforeReload: () => void): void {
     const startedAt = Date.now();
     let sawServerDown = false;
 
@@ -43,6 +47,7 @@ function waitForServerRestart(term: GoTTYXterm, basePath: string): void {
                 credentials: "same-origin",
             });
             if (response.ok && (sawServerDown || Date.now() - startedAt > 1500)) {
+                beforeReload();
                 window.location.reload();
                 return;
             }
@@ -67,7 +72,7 @@ function restartMessageForMode(mode: string): string {
     return "Restart request sent. Waiting for GoTTY to come back...";
 }
 
-function installServerRestart(term: GoTTYXterm, basePath: string, authToken: string): void {
+function installServerRestart(term: GoTTYXterm, basePath: string, authToken: string, beforeReload: () => void): void {
     const configuredRestartMode = typeof gotty_restart_mode !== "undefined" ? gotty_restart_mode : "exec";
     term.setRestartSender(async () => {
         if (configuredRestartMode === "disabled") {
@@ -104,7 +109,7 @@ function installServerRestart(term: GoTTYXterm, basePath: string, authToken: str
                 throw new Error(message);
             }
             term.showMessage(restartMessageForMode(mode), 0);
-            waitForServerRestart(term, basePath);
+            waitForServerRestart(term, basePath, beforeReload);
         } catch (err) {
             const message = err instanceof Error ? err.message : String(err);
             term.showMessage(`Restart failed: ${message}`, 5000);
@@ -141,7 +146,9 @@ if (elem !== null) {
     var term: GoTTYXterm;
     const shareReadOnly = typeof gotty_share_readonly !== "undefined" && gotty_share_readonly;
     term = new GoTTYXterm(elem, gotty_preferences, { readOnly: shareReadOnly });
-    initThemePicker(term.term, { controls: !shareReadOnly });
+    initThemePicker(term.term, { controls: !shareReadOnly, refit: () => term.refit() });
+    initMobileKeys(term, !shareReadOnly && typeof gotty_mobile_keys !== "undefined" && gotty_mobile_keys);
+    const confirmClose = createConfirmClose(typeof gotty_confirm_close !== "undefined" && gotty_confirm_close);
     if (!shareReadOnly) {
         initShareManager();
     }
@@ -196,8 +203,10 @@ if (elem !== null) {
     const args = window.location.search;
     const factory = new ConnectionFactory(url);
     const wt = new WebTTY(term, factory, args, authToken);
+    wt.onConnect = () => confirmClose.setConnected(true);
+    wt.onDisconnect = () => confirmClose.setConnected(false);
     if (!shareReadOnly) {
-        installServerRestart(term, basePath, authToken);
+        installServerRestart(term, basePath, authToken, confirmClose.dispose);
     }
     const closer = wt.open();
 
@@ -217,6 +226,8 @@ if (elem !== null) {
         if (event.persisted) {
             return;
         }
+        confirmClose.dispose();
+        disposeMobileKeys(term);
         uninstallFaviconAlert();
         voiceInput?.close();
         closer();

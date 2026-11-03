@@ -25,7 +25,7 @@ type HistoryBuffer struct {
 
 func NewHistoryBuffer(maxSize int) *HistoryBuffer {
 	return &HistoryBuffer{
-		chunks: make([]historyChunk, 0),
+		chunks:  make([]historyChunk, 0),
 		maxSize: maxSize,
 		epoch:   newHistoryEpoch(),
 	}

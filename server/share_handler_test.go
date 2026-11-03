@@ -132,6 +132,8 @@ func TestConfigMarksReadOnlyPasswordlessShare(t *testing.T) {
 		Passwordless: true,
 	})
 
+	server.options.MobileKeys = true
+
 	req := httptest.NewRequest(http.MethodGet, "https://gotty-demo.httptunnel.top/config.js", nil)
 	req.Host = "gotty-demo.httptunnel.top"
 	rec := httptest.NewRecorder()
@@ -146,6 +148,7 @@ func TestConfigMarksReadOnlyPasswordlessShare(t *testing.T) {
 		"var gotty_share_readonly = true;",
 		"var gotty_share_passwordless = true;",
 		"var gotty_permit_write = false;",
+		"var gotty_mobile_keys = false;",
 		"var gotty_enable_asr = false;",
 		"var gotty_restart_mode = 'disabled';",
 	} {

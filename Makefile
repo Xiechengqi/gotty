@@ -1,6 +1,6 @@
 OUTPUT_DIR = ./builds
 GIT_COMMIT = `git rev-parse HEAD | cut -c1-7`
-VERSION = $(shell git describe --tags)
+VERSION = $(shell git describe --tags --always)
 BUILD_OPTIONS = -ldflags "-X main.Version=$(VERSION)"
 
 ifeq ($(DEV), 1)
@@ -16,11 +16,13 @@ gotty: main.go assets server/*.go webtty/*.go backend/*.go Makefile
 	go build ${BUILD_OPTIONS}
 
 docker:
-	docker build . -t gotty-bash:$(VERSION)
+	docker build --build-arg VERSION=$(VERSION) . -t gotty-bash:$(VERSION)
 
 .PHONY: all docker assets
 assets: bindata/static/js/gotty.js.map \
 	bindata/static/js/gotty.js \
+	bindata/static/js/gotty.licenses.txt \
+	bindata/static/js/gotty.js.LICENSE.txt \
 	bindata/static/index.html \
 	bindata/static/icon.svg \
 	bindata/static/favicon.ico \
@@ -44,17 +46,17 @@ bindata/static/css/%.css: resources/%.css | bindata/static
 bindata/static/css/xterm.css: js/node_modules/@xterm/xterm/css/xterm.css | bindata/static
 	cp "$<" "$@"
 
-js/node_modules/@xterm/xterm/dist/xterm.css:
+js/node_modules/@xterm/xterm/css/xterm.css:
 	cd js && \
-	npm install
+	npm ci
 
-bindata/static/js/gotty.js.map bindata/static/js/gotty.js: js/src/* | js/node_modules/webpack
+bindata/static/js/gotty.js.map bindata/static/js/gotty.js bindata/static/js/gotty.licenses.txt bindata/static/js/gotty.js.LICENSE.txt &: $(wildcard js/src/*.ts js/src/*.tsx js/src/*.scss) js/webpack.config.js js/tsconfig.json js/package-lock.json | js/node_modules/webpack
 	cd js && \
 	npx webpack --mode=$(WEBPACK_MODE)
 
-js/node_modules/webpack:
+js/node_modules/webpack: js/package.json js/package-lock.json
 	cd js && \
-	npm install
+	npm ci
 
 README-options:
 	./gotty --help | sed '1,/GLOBAL OPTIONS/ d' > options.txt.tmp
@@ -62,15 +64,14 @@ README-options:
 	rm options.txt.tmp
 
 tools:
-	go install github.com/mitchellh/gox@latest
 	go install github.com/tcnksm/ghr@latest
 
 test:
-	if [ `go fmt $(go list ./... | grep -v /vendor/) | wc -l` -gt 0 ]; then echo "go fmt error"; exit 1; fi
+	test -z "$$(gofmt -l $$(git ls-files '*.go'))"
 	go test ./...
 
 cross_compile:
-	GOARM=5 gox -os="darwin linux freebsd netbsd openbsd solaris" -arch="386 amd64 arm arm64" -osarch="!darwin/386" -osarch="!darwin/arm" $(BUILD_OPTIONS) -output "${OUTPUT_DIR}/pkg/{{.OS}}_{{.Arch}}/{{.Dir}}"
+	./scripts/build-linux.sh
 
 targz:
 	mkdir -p ${OUTPUT_DIR}/dist
@@ -90,3 +91,13 @@ clean:
 addcontributors:
 	-gh issue list -s all -L 1000 --json author -t "$$(/bin/echo -e '{{ range . }}{{ .author.login }}\n{{ end }}')" | sort | uniq | xargs -Ifoo -t all-contributors add foo bug --commitTemplate '<%= (newContributor ? "Add" : "Update") %> @<%= username %> as a contributor'
 	-gh pr list -s all -L 1000 --json author -t "$$(/bin/echo -e '{{ range . }}{{ .author.login }}\n{{ end }}')" | sort | uniq | xargs -Ifoo -t all-contributors add foo code --commitTemplate '<%= (newContributor ? "Add" : "Update") %> @<%= username %> as a contributor'
+
+.PHONY: test-js typecheck test-e2e
+test-js:
+	cd js && npm test
+
+typecheck:
+	cd js && npm run typecheck
+
+test-e2e:
+	cd js && npm run test:e2e

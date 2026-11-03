@@ -1,48 +1,48 @@
-name: "Unit and Build Tests"
+name: Validate
 
 on:
+  workflow_call:
   workflow_dispatch:
+  pull_request:
+    branches: [master]
 
+permissions:
+  contents: read
 
 jobs:
-  bundle-up-to-date:
-    runs-on: "ubuntu-latest"
-
+  validate:
+    runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v6
-      with:
-        fetch-depth: 0
-    - uses: actions/setup-go@v6
-      with:
-        go-version-file: go.mod
-    - uses: actions/setup-node@v6
-      with:
-        node-version: 22
-    - run: "make clean"
-    - run: "make assets"
-    - name: "Make sure gotty.js bundle is up-to-date"
-      run: "diffsize=$(git diff bindata/static/js/gotty.js |  wc -l); test $diffsize == 0"
-
-
-  cross-compile-test:
-    runs-on: "ubuntu-latest"
-
-    steps:
-    - uses: actions/checkout@v6
-      with:
-        fetch-depth: 0
-
-    - name: Set up Go
-      uses: actions/setup-go@v6
-      with:
-        go-version-file: go.mod
-
-    - name: "Build & test"
-      run: "make tools test cross_compile"
-
-    - name: Upload artifacts
-      if: ${{ !env.ACT }}
-      uses: actions/upload-artifact@v7
-      with:
-        name: binaries
-        path: builds/pkg/*/gotty
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: js/package-lock.json
+      - run: cd js && npm ci
+      - name: Go tests and vet
+        run: |
+          test -z "$(gofmt -l $(git ls-files '*.go'))"
+          go vet ./...
+          go test -race ./...
+      - run: make typecheck test-js
+      - name: Build frontend and verify committed assets
+        run: |
+          make assets
+          ./scripts/check-frontend-assets.sh
+      - name: Install browser and transfer tools
+        run: |
+          cd js && npx playwright install --with-deps chromium
+          sudo apt-get update
+          sudo apt-get install -y lrzsz
+      - run: make test-e2e
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: playwright-artifacts
+          path: js/test-results/

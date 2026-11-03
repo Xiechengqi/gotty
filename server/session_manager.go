@@ -245,9 +245,10 @@ func (sm *SessionManager) Run() {
 				}
 			}
 			client.replay = sm.buildReplaySnapshot(client.init)
+			// Keep the channel reference immutable: the handler waits on it
+			// concurrently, and closing publishes the initialized replay state.
 			if client.ready != nil {
 				close(client.ready)
-				client.ready = nil
 			}
 			sm.mu.Unlock()
 

@@ -308,3 +308,38 @@ curl -H 'Authorization: Bearer user:pass' http://127.0.0.1:8080/api/v1/status
 ## License
 
 MIT
+
+## Mobile keys and close confirmation
+
+Touch devices show Esc, Tab, Ctrl, Alt, Shift, arrows, Home/End and PgUp/PgDn above the on-screen keyboard. Modifiers affect the next key; multi-character pastes and IME commits pass through unchanged. The strip requires effective write permission and is hidden for read-only shares.
+
+```hcl
+mobile_keys = true
+confirm_close = true
+```
+
+Both settings default to true. Disable them with `--mobile-keys=false` or `--confirm-close=false`. Close confirmation is armed while the WebSocket is connected; the browser controls the dialog and usually requires prior user interaction. An intentional reload after restarting the server bypasses the guard. Font changes and restored display preferences refit the terminal; unavailable fonts are marked and cannot be selected.
+
+## Reverse proxies
+
+The proxy's GoTTY connection must support HTTP/1.1 WebSocket Upgrade and forward the `Upgrade` and `Connection` headers. Check for `101 Switching Protocols` on the `ws` request. Authentication, Origin checks, routing and connection limits can all cause failures; the connection limit returns `503`.
+
+Preserve the original Host (nginx: `proxy_set_header Host $http_host;`) or configure a precise `--ws-origin` regular expression. Preserve the path prefix and match `--path` for subpath deployments.
+
+## Development and release validation
+
+Use Go 1.26 and Node.js 24:
+
+```bash
+cd js && npm ci && cd ..
+make typecheck test-js assets
+go vet ./...
+go test -race ./...
+cd js && npx playwright install --with-deps chromium && cd ..
+# Install lrzsz with your system package manager before the browser tests.
+make test-e2e
+```
+
+esbuild transpiles the frontend; TypeScript 7 checks types separately. Commit rebuilt JS, sourcemaps and license inventories with frontend changes. CI checks all embedded assets and the xterm license entries.
+
+`./scripts/build-linux.sh` (also used by `make cross_compile`) builds Linux amd64/arm64 with a matching embedded tunnel client, and restores the original local payload on exit. Pass an architecture to build one target. Other platforms can be built with Go, but have no bundled tunnel-client release artifact. Docker builds the frontend on the build platform, cross-compiles Go for the target, and uses Alpine 3.24. The workflows publish Linux amd64/arm64 only and require shared validation first. Tunnel downloads still follow the external `latest` release; pin that artifact for fully reproducible release builds.

@@ -30,7 +30,7 @@ esac
 out="server/http_tunnel_client_bin/http-tunnel-client"
 tmp="${out}.tmp"
 mkdir -p "$(dirname "${out}")"
-curl -fsSL "${url}" -o "${tmp}"
+curl --retry 3 --connect-timeout 15 --max-time 180 -fsSL "${url}" -o "${tmp}"
 chmod 0755 "${tmp}"
 if [[ "${arch}" == "${host_arch}" ]]; then
   "${tmp}" version >/dev/null

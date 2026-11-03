@@ -132,6 +132,7 @@ func New(factory Factory, options *Options) (*Server, error) {
 // existing connections. Use WithGracefullContext() to support gracefull shutdown.
 func (server *Server) Run(ctx context.Context, options ...RunOption) error {
 	cctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	opts := &RunOptions{gracefullCtx: context.Background()}
 	for _, opt := range options {
 		opt(opts)

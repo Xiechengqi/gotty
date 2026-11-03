@@ -6,3 +6,6 @@ js/node_modules/*
 .claude
 server/http_tunnel_client_bin/http-tunnel-client
 /RECONNECT_REPLAY_PLAN.md
+
+js/test-results/
+js/playwright-report/

@@ -6,11 +6,21 @@ on:
     branches:
       - master
 
+concurrency:
+  group: latest-release-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: write
 
 jobs:
+  validate:
+    uses: ./.github/workflows/main.yaml
+    permissions:
+      contents: read
+
   build:
+    needs: validate
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -21,27 +31,23 @@ jobs:
             arch: arm64
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: false
 
-      - name: Embed http-tunnel client for ${{ matrix.arch }}
-        run: ./scripts/prepare-http-tunnel-client.sh ${{ matrix.arch }}
-
-      - name: Build gotty binary for ${{ matrix.arch }}
+      - name: Build binary with matching tunnel client
         run: |
-          VERSION=$(git describe --tags --always 2>/dev/null || echo "latest")
-          GOOS=linux GOARCH=${{ matrix.arch }} CGO_ENABLED=0 go build \
-            -ldflags "-X main.Version=${VERSION}" \
-            -trimpath \
-            -o gotty-linux-${{ matrix.arch }} .
+          ./scripts/build-linux.sh ${{ matrix.arch }}
+          cp builds/pkg/linux_${{ matrix.arch }}/gotty gotty-linux-${{ matrix.arch }}
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: gotty-linux-${{ matrix.arch }}
           path: gotty-linux-${{ matrix.arch }}
@@ -51,17 +57,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           path: artifacts
 
       - name: Prepare release files
         run: |
           mkdir -p release-files
-          cp artifacts/*/* release-files/ 2>/dev/null || true
+          cp artifacts/gotty-linux-amd64/gotty-linux-amd64 release-files/
+          cp artifacts/gotty-linux-arm64/gotty-linux-arm64 release-files/
           ls -lh release-files/
 
       - name: Get version
@@ -86,7 +95,7 @@ jobs:
           git push -f origin latest
 
       - name: Create or Update Latest Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: latest
           name: "Latest Build (v${{ steps.version.outputs.version }})"

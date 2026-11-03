@@ -308,3 +308,42 @@ curl -H 'Authorization: Bearer user:pass' http://127.0.0.1:8080/api/v1/status
 ## License
 
 MIT
+
+## 移动端按键与关闭确认
+
+触摸设备打开软键盘时，终端会显示 Esc、Tab、Ctrl、Alt、Shift、方向键、Home/End 和 PgUp/PgDn。修饰键作用于下一次按键；多字符粘贴和输入法提交保留原文。按键栏需要有效写权限，只读分享不会显示。
+
+```hcl
+mobile_keys = true
+confirm_close = true
+```
+
+两个选项默认开启，可用 `--mobile-keys=false` 和 `--confirm-close=false` 关闭。关闭确认仅在 WebSocket 已连接时启用；浏览器通常要求用户先与页面交互，提示文字由浏览器决定。服务重启完成后的主动刷新不会触发确认。
+
+修改字号、字体或恢复保存的显示设置后，终端会重新计算行列；未安装的字体会标记并禁用选择。
+
+## 反向代理
+
+代理到 GoTTY 的 WebSocket 路径需要支持 HTTP/1.1 Upgrade，并转发 `Upgrade` 和 `Connection` 请求头。浏览器开发者工具中 `ws` 请求应返回 `101 Switching Protocols`；失败时结合状态码和服务端日志排查鉴权、Origin、路径及连接上限，超过连接上限返回 `503`。
+
+默认 Origin 校验要求浏览器 Origin 与 GoTTY 收到的 Host 匹配。保留原始 Host（nginx 可配置 `proxy_set_header Host $http_host;`），或使用精确的 `--ws-origin` 正则配置允许来源。子路径部署时保留路径前缀，并与 `--path` 一致。
+
+## 开发验证与发布
+
+使用 Go 1.26 和 Node.js 24：
+
+```bash
+cd js && npm ci && cd ..
+make typecheck test-js assets
+go vet ./...
+go test -race ./...
+# 首次运行浏览器测试需安装 Chromium 和系统 lrzsz
+cd js && npx playwright install --with-deps chromium && cd ..
+make test-e2e
+```
+
+前端构建使用 esbuild 转译，类型检查由 TypeScript 7 独立执行，两者都需要通过。提交前端源码或依赖变更时，同时提交 `make assets` 生成的 JS、sourcemap 和许可清单。CI 检查整个 `bindata/static` 目录及 xterm 许可条目。
+
+`./scripts/build-linux.sh` 构建 Linux amd64/arm64，并为每个目标嵌入对应的 `http-tunnel-client`；也可指定单个架构。脚本退出时恢复本地原有嵌入文件。`make cross_compile` 使用相同流程；其余平台可自行使用 Go 构建，但没有配套的内嵌隧道客户端发布产物。
+
+Docker 使用 Node.js 24 在构建平台生成前端，Go 按目标架构编译，运行镜像固定为 Alpine 3.24。官方工作流仅发布 Linux amd64/arm64。隧道客户端下载仍跟随其 `latest` 发布，因此完整发布复现还需要固定该外部产物。自动发布及手动发布均先运行统一验证流程。

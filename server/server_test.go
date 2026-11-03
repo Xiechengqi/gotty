@@ -11,12 +11,12 @@ import (
 // mockSlave implements Slave for testing purposes.
 type mockSlave struct{}
 
-func (s *mockSlave) Read(p []byte) (n int, err error)               { return 0, io.EOF }
-func (s *mockSlave) Write(p []byte) (n int, err error)               { return len(p), nil }
-func (s *mockSlave) Close() error                                     { return nil }
-func (s *mockSlave) WindowTitleVariables() map[string]interface{}     { return nil }
-func (s *mockSlave) ResizeTerminal(width int, height int) error       { return nil }
-func (s *mockSlave) GetWorkingDir() (string, error)                   { return "", nil }
+func (s *mockSlave) Read(p []byte) (n int, err error)             { return 0, io.EOF }
+func (s *mockSlave) Write(p []byte) (n int, err error)            { return len(p), nil }
+func (s *mockSlave) Close() error                                 { return nil }
+func (s *mockSlave) WindowTitleVariables() map[string]interface{} { return nil }
+func (s *mockSlave) ResizeTerminal(width int, height int) error   { return nil }
+func (s *mockSlave) GetWorkingDir() (string, error)               { return "", nil }
 
 // mockFactory implements Factory for testing purposes.
 type mockFactory struct{}

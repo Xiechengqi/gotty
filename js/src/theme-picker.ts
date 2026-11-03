@@ -55,25 +55,67 @@ function applyTheme(term: Terminal | undefined, colors: { [key: string]: string 
     }
 }
 
-// Apply stored font settings
-function applyFontPrefs(term: Terminal | undefined) {
-    if (!term) return;
+// CSS generic families always resolve, so they can never be "not installed".
+// Browsers also disagree on whether a generic is accepted where a font name
+// goes (i.e. quoted, inside the font shorthand), so never measure them.
+const GENERIC_FAMILIES = ["monospace", "serif", "sans-serif", "cursive", "fantasy", "system-ui"];
+
+// Whether a font can actually be used in this browser. There is no direct
+// API for this: document.fonts.check() answers true even for names that do
+// not exist. So measure the same sample against two different fallbacks — an
+// installed font overrides both and gives equal widths, a missing one falls
+// back to each separately and differs.
+function isFontAvailable(name: string): boolean {
+    if (GENERIC_FAMILIES.includes(name.toLowerCase())) return true;
+    const ctx = document.createElement("canvas").getContext("2d");
+    // Without canvas we cannot tell; assume available rather than hide it.
+    if (!ctx) return true;
+    const sample = "mmmmmmmmmmlliWM@#";
+    ctx.font = `72px '${name}', serif`;
+    const withSerif = ctx.measureText(sample).width;
+    ctx.font = `72px '${name}', monospace`;
+    const withMonospace = ctx.measureText(sample).width;
+    return Math.abs(withSerif - withMonospace) < 0.5;
+}
+
+// Re-fit the terminal after a font change. xterm measures the new cell size
+// on its own render pass and the fit add-on sizes the grid from those
+// metrics, so wait a frame instead of fitting against the old cell size.
+// Two frames in case the option change is itself batched.
+function refitSoon(refit?: () => void): void {
+    if (!refit) return;
+    const schedule: (cb: () => void) => void =
+        typeof requestAnimationFrame === "function"
+            ? (cb) => { requestAnimationFrame(cb); }
+            : (cb) => { setTimeout(cb, 0); };
+    schedule(() => schedule(() => refit()));
+}
+
+// Apply stored font settings; reports whether anything was applied, since a
+// restored font is not what the initial fit was measured against.
+function applyFontPrefs(term: Terminal | undefined): boolean {
+    if (!term) return false;
+    let applied = false;
     const fs = localStorage.getItem(STORAGE_FONT_SIZE);
     if (fs) {
         const n = parseInt(fs, 10);
         if (!isNaN(n) && n >= 8 && n <= 48) {
+            applied = applied || term.options.fontSize !== n;
             term.options.fontSize = n;
         }
     }
     const ff = localStorage.getItem(STORAGE_FONT_FAMILY) || DEFAULT_FONT_FAMILY;
     if (ff) {
+        applied = applied || term.options.fontFamily !== ff;
         term.options.fontFamily = ff;
     }
+    return applied;
 }
 
 // Build the picker UI and attach it to the page
 interface ThemePickerOptions {
     controls?: boolean;
+    refit?: () => void;
 }
 
 export function initThemePicker(term?: Terminal, options: ThemePickerOptions = {}): void {
@@ -90,7 +132,7 @@ export function initThemePicker(term?: Terminal, options: ThemePickerOptions = {
     if (activeThemeName && themes[activeThemeName]) {
         applyTheme(term, themes[activeThemeName]);
     }
-    applyFontPrefs(term);
+    if (applyFontPrefs(term)) refitSoon(options.refit);
 
     if (options.controls === false) {
         return;
@@ -269,6 +311,19 @@ export function initThemePicker(term?: Terminal, options: ThemePickerOptions = {
 #gotty-theme-picker .font-family-item.active .font-family-check {
     visibility: visible;
 }
+#gotty-theme-picker .font-family-item.unavailable {
+    opacity: 0.4;
+    cursor: default;
+}
+#gotty-theme-picker .font-family-item.unavailable:hover {
+    background: transparent;
+    color: #ccc;
+}
+#gotty-theme-picker .font-family-tag {
+    font-size: 10px;
+    color: rgba(255,255,255,0.35);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
 `;
 
     document.head.appendChild(style);
@@ -371,6 +426,7 @@ export function initThemePicker(term?: Terminal, options: ThemePickerOptions = {
                 term.options.fontSize = sz;
             }
             localStorage.setItem(STORAGE_FONT_SIZE, String(sz));
+            refitSoon(options.refit);
             sizeRow.querySelectorAll(".size-btn").forEach((el) => el.classList.remove("active"));
             sb.classList.add("active");
         });
@@ -388,10 +444,18 @@ export function initThemePicker(term?: Terminal, options: ThemePickerOptions = {
     const currentFF = activeFontFamily || term?.options?.fontFamily || "";
 
     for (const ff of FONT_FAMILIES) {
+        // The picker cannot load fonts, so it can only use what is already
+        // installed. A name that is missing silently falls back to monospace
+        // and looks like the click did nothing, so mark those as unavailable
+        // and leave them unselectable.
+        const available = isFontAvailable(ff.name);
         const item = document.createElement("div");
         item.className = "font-family-item";
         if (ff.value === currentFF) {
             item.classList.add("active");
+        }
+        if (!available) {
+            item.classList.add("unavailable");
         }
 
         const preview = document.createElement("span");
@@ -400,21 +464,31 @@ export function initThemePicker(term?: Terminal, options: ThemePickerOptions = {
         preview.style.fontFamily = ff.value;
         item.appendChild(preview);
 
+        if (!available) {
+            const tag = document.createElement("span");
+            tag.className = "font-family-tag";
+            tag.textContent = "not installed";
+            item.appendChild(tag);
+        }
+
         const check = document.createElement("span");
         check.className = "font-family-check";
         check.textContent = "✓";
         item.appendChild(check);
 
-        item.addEventListener("click", () => {
-            if (term) {
-                term.options.fontFamily = ff.value;
-            }
-            localStorage.setItem(STORAGE_FONT_FAMILY, ff.value);
-            panel.querySelectorAll(".font-family-item").forEach((el) => {
-                el.classList.remove("active");
+        if (available) {
+            item.addEventListener("click", () => {
+                if (term) {
+                    term.options.fontFamily = ff.value;
+                }
+                localStorage.setItem(STORAGE_FONT_FAMILY, ff.value);
+                panel.querySelectorAll(".font-family-item").forEach((el) => {
+                    el.classList.remove("active");
+                });
+                item.classList.add("active");
+                refitSoon(options.refit);
             });
-            item.classList.add("active");
-        });
+        }
 
         panel.appendChild(item);
     }

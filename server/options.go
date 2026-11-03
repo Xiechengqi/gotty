@@ -45,6 +45,8 @@ type Options struct {
 	EnableWebGL         bool   `hcl:"enable_webgl" flagName:"enable-webgl" flagDescribe:"Enable WebGL renderer" default:"true"`
 	EnableIdleAlert     bool   `hcl:"enable_idle_alert" flagName:"enable-idle-alert" flagDescribe:"Enable idle alert feature (show speaker icon)" default:"false"`
 	IdleAlertTimeout    int    `hcl:"idle_alert_timeout" flagName:"idle-alert-timeout" flagDescribe:"Idle alert timeout in seconds" default:"30"`
+	ConfirmClose        bool   `hcl:"confirm_close" flagName:"confirm-close" flagDescribe:"Ask the browser to confirm before closing/reloading the page while a session is connected" default:"true"`
+	MobileKeys          bool   `hcl:"mobile_keys" flagName:"mobile-keys" flagDescribe:"Show a strip of special keys (Esc, Ctrl, Alt, Tab, arrows, ...) above the on-screen keyboard on touch devices" default:"true"`
 	Quiet               bool   `hcl:"quiet" flagName:"quiet" flagDescribe:"Don't log" default:"false"`
 
 	EnableAPI      bool `hcl:"enable_api" flagName:"enable-api" flagDescribe:"Enable REST API for terminal control" default:"false"`

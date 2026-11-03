@@ -179,6 +179,8 @@ export class WebTTY {
      * into chunks small enough that we don't hurt the server's feelings.
      */
     bufSize: number;
+    onConnect?: () => void;
+    onDisconnect?: () => void;
     resizeDebounceMs: number;
     resizeTimer: ReturnType<typeof setTimeout> | null;
     pendingResize: { columns: number, rows: number } | null;
@@ -229,6 +231,7 @@ export class WebTTY {
 
         return () => {
             this.stopped = true;
+            this.onDisconnect?.();
             document.removeEventListener("visibilitychange", onVisibilityChange);
             window.removeEventListener("pageshow", onPageShow);
             window.removeEventListener("online", onOnline);
@@ -285,6 +288,7 @@ export class WebTTY {
                 return;
             }
             this.reconnectAttempts = 0;
+            this.onConnect?.();
             this.term.removeMessage();
             const termInfo = this.term.info();
 
@@ -330,6 +334,7 @@ export class WebTTY {
             this.clearProbeTimer();
             this.connection = null;
             this.term.deactivate();
+            this.onDisconnect?.();
             if (!this.stopped) {
                 const closeMessage = this.describeClose(event);
                 if (this.isAuthenticationClose(event)) {

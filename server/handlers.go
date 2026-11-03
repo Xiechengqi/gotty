@@ -68,6 +68,7 @@ func (server *Server) generateHandleWS(ctx context.Context, gracefullCtx context
 		if int64(server.options.MaxConnection) != 0 {
 			if num > server.options.MaxConnection {
 				closeReason = "exceeding max number of connections"
+				http.Error(w, "Exceeding max number of connections", http.StatusServiceUnavailable)
 				return
 			}
 		}
@@ -430,6 +431,8 @@ func (server *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	lines := []string{
+		fmt.Sprintf("var gotty_confirm_close = %t;", server.options.ConfirmClose),
+		fmt.Sprintf("var gotty_mobile_keys = %t;", server.options.MobileKeys && permitWrite),
 		"var gotty_term = 'xterm';",
 		"var gotty_ws_query_args = '" + server.options.WSQueryArgs + "';",
 		"var gotty_permit_write = " + strconv.FormatBool(permitWrite) + ";",
