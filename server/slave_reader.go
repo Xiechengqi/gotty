@@ -39,6 +39,9 @@ func (server *Server) readSlaveOutput(ctx context.Context, slave Slave, generati
 				return
 			}
 
+			if server.hub != nil {
+				server.hub.activity()
+			}
 			select {
 			case server.sessionManager.broadcast <- newOutputBroadcastWithGeneration(raw, generation):
 			case <-ctx.Done():

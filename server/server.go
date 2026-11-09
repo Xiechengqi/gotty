@@ -11,6 +11,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -50,6 +51,7 @@ type Server struct {
 	broadcastCtrl  *BroadcastController
 	execManager    *ExecManager
 	shareManager   *ShareManager
+	hub            *hubManager
 }
 
 // New creates a new instance of Server.
@@ -187,6 +189,13 @@ func (server *Server) Run(ctx context.Context, options ...RunOption) error {
 		}
 	}
 
+	if server.options.HubEnabled {
+		server.hub, err = newHubManager(cctx, server)
+		if err != nil {
+			return errors.Wrap(err, "initialize Hub connector")
+		}
+		go server.hub.run()
+	}
 	go server.sessionManager.Run()
 	go server.readSlaveOutput(cctx, slave, server.sessionManager.Generation())
 
@@ -364,6 +373,49 @@ func (server *Server) setupHandlers(ctx context.Context, gracefullCtx context.Co
 
 	wsMux := http.NewServeMux()
 	wsMux.Handle("/", siteHandler)
+	if server.hub != nil {
+		wsMux.HandleFunc(pathPrefix+"-/hub", server.hub.handler)
+		wsMux.HandleFunc(pathPrefix+"-/hub-status", func(w http.ResponseWriter, r *http.Request) {
+			if !server.authorizeControlRequest(r) || server.isPublicShareRequest(r) {
+				http.Error(w, "forbidden", 403)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Cache-Control", "no-store")
+			server.hub.mu.Lock()
+			bound := server.hub.binding.Instance != ""
+			server.hub.mu.Unlock()
+			if !bound {
+				http.Error(w, "not bound", 404)
+				return
+			}
+			f := server.hub.status()
+			_, _ = w.Write(f.Data)
+		})
+		wsMux.HandleFunc(pathPrefix+"-/hub-view", func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != "POST" || !server.authorizeControlRequest(r) || server.isPublicShareRequest(r) {
+				http.Error(w, "forbidden", 403)
+				return
+			}
+			if origin := r.Header.Get("Origin"); origin != "" {
+				u, e := url.Parse(origin)
+				if e != nil || u.Host != r.Host {
+					http.Error(w, "forbidden", 403)
+					return
+				}
+			}
+			var v struct {
+				ID      string
+				Viewing bool
+			}
+			if json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024)).Decode(&v) != nil || len(v.ID) != 64 {
+				http.Error(w, "invalid", 400)
+				return
+			}
+			server.hub.setViewing("direct-"+v.ID, v.Viewing)
+			w.WriteHeader(204)
+		})
+	}
 	wsMux.HandleFunc(pathPrefix+"-/restart", server.generateHandleSelfRestart(cancel))
 	wsMux.HandleFunc(pathPrefix+"ws", server.generateHandleWS(ctx, gracefullCtx, cancel, counter))
 	wsMux.HandleFunc(pathPrefix+"asr/ws", server.generateHandleASRWS(ctx, gracefullCtx))

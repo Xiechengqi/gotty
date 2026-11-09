@@ -5,6 +5,10 @@ import (
 )
 
 type Options struct {
+	HubEnabled   bool   `hcl:"hub_enabled" flagName:"hub-enabled" flagDescribe:"Enable GoTTY Hub enrollment and connector" default:"false"`
+	HubStateFile string `hcl:"hub_state_file" flagName:"hub-state-file" flagDescribe:"Hub binding file (administrator token is stored beside it with .admin suffix)" default:"~/.gotty/hub.json"`
+	HubAllowHTTP bool   `hcl:"hub_allow_http" flagName:"hub-allow-http" flagDescribe:"Allow insecure Hub HTTP for local development only" default:"false"`
+
 	Address             string `hcl:"address" flagName:"address" flagSName:"a" flagDescribe:"IP address(es) to listen (comma-separated for multiple)" default:"0.0.0.0"`
 	Port                string `hcl:"port" flagName:"port" flagSName:"p" flagDescribe:"Port number to liten" default:"8080"`
 	Path                string `hcl:"path" flagName:"path" flagSName:"m" flagDescribe:"Base path" default:"/"`

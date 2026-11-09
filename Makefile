@@ -50,7 +50,7 @@ js/node_modules/@xterm/xterm/css/xterm.css:
 	cd js && \
 	npm ci
 
-bindata/static/js/gotty.js.map bindata/static/js/gotty.js bindata/static/js/gotty.licenses.txt bindata/static/js/gotty.js.LICENSE.txt &: $(wildcard js/src/*.ts js/src/*.tsx js/src/*.scss) js/webpack.config.js js/tsconfig.json js/package-lock.json | js/node_modules/webpack
+bindata/static/js/gotty.js.map bindata/static/js/gotty.js bindata/static/js/gotty.licenses.txt bindata/static/js/gotty.js.LICENSE.txt &: $(wildcard js/src/*.ts js/src/*.tsx js/src/*.scss js/packages/terminal-core/*.ts) js/webpack.config.js js/tsconfig.json js/package-lock.json | js/node_modules/webpack
 	cd js && \
 	npx webpack --mode=$(WEBPACK_MODE)
 

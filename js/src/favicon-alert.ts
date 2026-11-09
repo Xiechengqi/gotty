@@ -84,7 +84,9 @@ export function installFaviconAlert(options: FaviconAlertOptions): () => void {
         leaveDebounceUntilMs !== null &&
         Date.now() < leaveDebounceUntilMs;
 
+    let remoteColor: FaviconColor | null = null;
     const setColor = (color: FaviconColor) => {
+        color = remoteColor ?? color;
         if (lastColor === color) return;
         lastColor = color;
 
@@ -218,6 +220,11 @@ export function installFaviconAlert(options: FaviconAlertOptions): () => void {
     window.addEventListener('focus', onFocus);
     window.addEventListener('blur', onBlur);
 
+    const onHubStatus = (event: Event) => {
+        const value = (event as CustomEvent).detail;
+        if (value === null || ['red','gray','yellow','green'].includes(value)) { remoteColor = value; render(); }
+    };
+    window.addEventListener('gotty-hub-status', onHubStatus);
     const unsubscribe = options.onActivity(handleActivity);
 
     render();
@@ -226,6 +233,7 @@ export function installFaviconAlert(options: FaviconAlertOptions): () => void {
         document.removeEventListener('visibilitychange', onVisibilityChange);
         window.removeEventListener('focus', onFocus);
         window.removeEventListener('blur', onBlur);
+        window.removeEventListener('gotty-hub-status', onHubStatus);
         unsubscribe();
         if (stopTimerId !== null) {
             window.clearTimeout(stopTimerId);

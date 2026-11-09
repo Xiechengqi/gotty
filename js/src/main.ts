@@ -7,6 +7,7 @@ import { VoiceInput } from "./voice-input";
 import { initThemePicker } from "./theme-picker";
 import { initMobileKeys, disposeMobileKeys } from "./mobile-keys";
 import { createConfirmClose } from "./confirm-close";
+import { initHubManager } from "./hub-manager";
 import { initShareManager } from "./share-manager";
 
 // @TODO remove these
@@ -200,6 +201,7 @@ if (elem !== null) {
     const queryArgs = (gotty_ws_query_args === "") ? "" : "?" + gotty_ws_query_args;
     const basePath = window.location.pathname.endsWith('/') ? window.location.pathname : window.location.pathname + '/';
     const url = (httpsEnabled ? 'wss://' : 'ws://') + window.location.host + basePath + 'ws' + queryArgs;
+    initHubManager(basePath,authToken);
     const args = window.location.search;
     const factory = new ConnectionFactory(url);
     const wt = new WebTTY(term, factory, args, authToken);
