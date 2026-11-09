@@ -6,6 +6,7 @@ import { WebglAddon } from '@xterm/addon-webgl';
 import { ImageAddon } from '@xterm/addon-image';
 import { ZModemAddon } from "./zmodem";
 import { TerminalStatePayload } from "./webtty";
+import { defaultDisplayOptions, terminalPreferences } from "../packages/terminal-core/appearance";
 import { render, createRef, Component } from 'preact';
 import { Modal } from 'bootstrap';
 
@@ -361,12 +362,7 @@ export class GoTTYXterm {
         this.encoder = new TextEncoder();
         this.term = new Terminal({
             allowProposedApi: true,
-            customGlyphs: true,
-            rescaleOverlappingGlyphs: true,
-            theme: {
-                background: 'rgb(40, 41, 53)'
-            },
-            scrollback: 500
+            ...defaultDisplayOptions(),
         });
 
         const unicode11Addon = new Unicode11Addon();
@@ -913,41 +909,8 @@ export class GoTTYXterm {
             return;
         }
 
-        // Apply font settings first so the renderer initializes with the
-        // correct font metrics before any renderer-specific logic.
-        const keys = Object.keys(value);
-        const fontKeys = keys.filter(k => k === "font-family" || k === "font-size");
-        const otherKeys = keys.filter(k => k !== "font-family" && k !== "font-size");
-
-        for (const key of [...fontKeys, ...otherKeys]) {
-            switch (key) {
-                case "font-family":
-                    this.term.options.fontFamily = value[key] as string;
-                    break;
-                case "font-size":
-                    this.term.options.fontSize = value[key] as number;
-                    break;
-                case "EnableWebGL":
-                    // Already loaded by default in constructor — skip to avoid
-                    // orphaning the first WebglAddon with a duplicate.
-                    break;
-                case "cursor-blink":
-                    this.term.options.cursorBlink = value[key] as boolean;
-                    break;
-                case "cursor-style":
-                    this.term.options.cursorStyle = value[key] as "block" | "underline" | "bar";
-                    break;
-                case "scrollback-lines":
-                    this.term.options.scrollback = value[key] as number;
-                    break;
-                case "theme":
-                    this.term.options.theme = value[key] as object;
-                    break;
-                case "alt-is-meta":
-                    this.altIsMeta = value[key] as boolean;
-                    break;
-            }
-        }
+        Object.assign(this.term.options, terminalPreferences(value));
+        if (typeof value["alt-is-meta"] === "boolean") this.altIsMeta = value["alt-is-meta"];
     };
 
     setupAltIsMeta() {

@@ -4,78 +4,15 @@
 
 import { Terminal } from "@xterm/xterm";
 
-// The global populated by /themes.js
-interface ThemeMap {
-    [name: string]: { [colorKey: string]: string };
-}
+import { DEFAULT_THEME, DEFAULT_FONT_FAMILY, FONT_SIZES, FONT_FAMILIES, themeLabel, isFontAvailable, xtermTheme, type ThemeMap } from "../packages/terminal-core/appearance";
 
 const STORAGE_THEME = "gotty-theme";
 const STORAGE_FONT_SIZE = "gotty-font-size";
 const STORAGE_FONT_FAMILY = "gotty-font-family";
-
-const DEFAULT_THEME = "nord";
-const DEFAULT_FONT_FAMILY = "'Source Code Pro', monospace";
 const PANEL_OPEN_EVENT = "gotty-panel-open";
 
-const FONT_SIZES = [10, 12, 14, 16, 18, 20, 24];
-
-interface FontFamilyOption {
-    name: string;
-    value: string;
-}
-
-const FONT_FAMILIES: FontFamilyOption[] = [
-    { name: "DejaVu Sans Mono", value: "'DejaVu Sans Mono', monospace" },
-    { name: "JetBrains Mono", value: "'JetBrains Mono', monospace" },
-    { name: "Fira Code", value: "'Fira Code', monospace" },
-    { name: "Source Code Pro", value: "'Source Code Pro', monospace" },
-    { name: "Monaco", value: "Monaco, monospace" },
-    { name: "Menlo", value: "Menlo, monospace" },
-    { name: "Cascadia Code", value: "'Cascadia Code', monospace" },
-    { name: "monospace", value: "monospace" },
-];
-
-// Helper: map a theme name to a friendly display label
-function themeLabel(name: string): string {
-    const labels: { [key: string]: string } = {
-        "default": "Default",
-        "nord": "Nord",
-        "dracula": "Dracula",
-        "solarized-dark": "Solarized Dark",
-        "monokai": "Monokai",
-        "light": "Light",
-    };
-    return labels[name] || name;
-}
-
-// Apply a theme's color map to an xterm.js terminal
-function applyTheme(term: Terminal | undefined, colors: { [key: string]: string } | undefined) {
-    if (term && colors) {
-        term.options.theme = colors as any;
-    }
-}
-
-// CSS generic families always resolve, so they can never be "not installed".
-// Browsers also disagree on whether a generic is accepted where a font name
-// goes (i.e. quoted, inside the font shorthand), so never measure them.
-const GENERIC_FAMILIES = ["monospace", "serif", "sans-serif", "cursive", "fantasy", "system-ui"];
-
-// Whether a font can actually be used in this browser. There is no direct
-// API for this: document.fonts.check() answers true even for names that do
-// not exist. So measure the same sample against two different fallbacks — an
-// installed font overrides both and gives equal widths, a missing one falls
-// back to each separately and differs.
-function isFontAvailable(name: string): boolean {
-    if (GENERIC_FAMILIES.includes(name.toLowerCase())) return true;
-    const ctx = document.createElement("canvas").getContext("2d");
-    // Without canvas we cannot tell; assume available rather than hide it.
-    if (!ctx) return true;
-    const sample = "mmmmmmmmmmlliWM@#";
-    ctx.font = `72px '${name}', serif`;
-    const withSerif = ctx.measureText(sample).width;
-    ctx.font = `72px '${name}', monospace`;
-    const withMonospace = ctx.measureText(sample).width;
-    return Math.abs(withSerif - withMonospace) < 0.5;
+function applyTheme(term: Terminal | undefined, colors: Record<string, string> | undefined) {
+    if (term && colors) term.options.theme = xtermTheme(colors);
 }
 
 // Re-fit the terminal after a font change. xterm measures the new cell size

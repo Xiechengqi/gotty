@@ -1,6 +1,6 @@
 {
   "name": "@gotty/terminal-core",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": false,
   "type": "module",
   "main": "webtty.ts",
@@ -8,11 +8,13 @@
   "files": [
     "webtty.ts",
     "LICENSE",
-    "voice-input.ts"
+    "voice-input.ts",
+    "appearance.ts"
   ],
   "exports": {
     ".": "./webtty.ts",
-    "./voice-input": "./voice-input.ts"
+    "./voice-input": "./voice-input.ts",
+    "./appearance": "./appearance.ts"
   },
   "license": "MIT"
 }

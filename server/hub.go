@@ -43,22 +43,26 @@ type hubBinding struct {
 	Name       string `json:"name,omitempty"`
 	RequestID  string `json:"request_id,omitempty"`
 	Claim      string `json:"claim,omitempty"`
+	Paused     bool   `json:"paused,omitempty"`
 }
 type hubManager struct {
-	server       *Server
-	ctx          context.Context
-	mu           sync.Mutex
-	managementMu sync.Mutex
-	binding      hubBinding
-	path         string
-	online       bool
-	leases       map[string]time.Time
-	lastOutput   time.Time
-	attention    bool
-	revision     uint64
-	color        string
-	wake         chan struct{}
-	unseenOutput time.Time
+	server           *Server
+	ctx              context.Context
+	mu               sync.Mutex
+	managementMu     sync.Mutex
+	binding          hubBinding
+	pending          hubBinding
+	path             string
+	online           bool
+	leases           map[string]time.Time
+	lastOutput       time.Time
+	attention        bool
+	revision         uint64
+	color            string
+	wake             chan struct{}
+	unseenOutput     time.Time
+	cancelRun        context.CancelFunc
+	connectionCancel context.CancelFunc
 }
 
 func hubRandom() string {
@@ -94,14 +98,27 @@ func newHubManager(ctx context.Context, s *Server) (*hubManager, error) {
 	} else if !os.IsNotExist(e) {
 		return nil, e
 	}
+	if b, e := os.ReadFile(p + ".pending"); e == nil {
+		if e = os.Chmod(p+".pending", 0600); e != nil {
+			return nil, e
+		}
+		if e = json.Unmarshal(b, &h.pending); e != nil {
+			return nil, e
+		}
+	} else if !os.IsNotExist(e) {
+		return nil, e
+	}
 	return h, nil
 }
 func (h *hubManager) saveLocked() error {
-	b, e := json.Marshal(h.binding)
+	return saveHubBinding(h.path, h.binding)
+}
+func saveHubBinding(path string, binding hubBinding) error {
+	b, e := json.Marshal(binding)
 	if e != nil {
 		return e
 	}
-	f, e := os.CreateTemp(filepath.Dir(h.path), ".hub-*")
+	f, e := os.CreateTemp(filepath.Dir(path), ".hub-*")
 	if e != nil {
 		return e
 	}
@@ -115,7 +132,7 @@ func (h *hubManager) saveLocked() error {
 	if e != nil {
 		return e
 	}
-	return os.Rename(f.Name(), h.path)
+	return os.Rename(f.Name(), path)
 }
 func (h *hubManager) authorize(r *http.Request) bool {
 	if h.server.isPublicShareRequest(r) {
@@ -135,12 +152,19 @@ func (h *hubManager) validateHub(raw string) (string, error) {
 	return strings.TrimRight(raw, "/"), nil
 }
 func (h *hubManager) request(ctx context.Context, base, path string, body any) (map[string]json.RawMessage, error) {
+	return h.deviceRequest(ctx, base, path, body, hubBinding{})
+}
+func (h *hubManager) deviceRequest(ctx context.Context, base, path string, body any, binding hubBinding) (map[string]json.RawMessage, error) {
 	b, _ := json.Marshal(body)
 	r, e := http.NewRequestWithContext(ctx, "POST", base+path, bytes.NewReader(b))
 	if e != nil {
 		return nil, e
 	}
 	r.Header.Set("Content-Type", "application/json")
+	if binding.Instance != "" {
+		r.Header.Set("X-Instance-ID", binding.Instance)
+		r.Header.Set("Authorization", "Bearer "+binding.Credential)
+	}
 	client := http.Client{Timeout: 20 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	res, e := client.Do(r)
 	if e != nil {
@@ -173,165 +197,6 @@ func (e *hubHTTPError) Error() string { return fmt.Sprintf("Hub rejected request
 func hubProblem(w http.ResponseWriter, status int, code, message string) {
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(map[string]string{"error": code, "message": message})
-}
-func (h *hubManager) handler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Cache-Control", "no-store")
-	if !h.authorize(r) {
-		hubProblem(w, 403, "forbidden", "无权管理此 GoTTY 的 Hub 配置。")
-		return
-	}
-	if r.Method == "GET" {
-		h.mu.Lock()
-		v := map[string]any{"url": h.binding.URL, "username": h.binding.Username, "instance_id": h.binding.Instance, "online": h.online}
-		h.mu.Unlock()
-		_ = json.NewEncoder(w).Encode(v)
-		return
-	}
-	if r.Method != "POST" {
-		hubProblem(w, 405, "method_not_allowed", "请求方法不支持。")
-		return
-	}
-	if !strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
-		hubProblem(w, 400, "invalid_request", "需要 JSON 请求。")
-		return
-	}
-	if origin := r.Header.Get("Origin"); origin != "" {
-		u, e := url.Parse(origin)
-		if e != nil || u.Host != r.Host || (u.Scheme != "http" && u.Scheme != "https") {
-			hubProblem(w, 403, "forbidden", "请求来源不匹配。")
-			return
-		}
-	}
-	if r.Header.Get("Sec-Fetch-Site") == "cross-site" {
-		hubProblem(w, 403, "forbidden", "请求来源不匹配。")
-		return
-	}
-	var v struct{ URL, Username string }
-	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8192))
-	decoder.DisallowUnknownFields()
-	if e := decoder.Decode(&v); e != nil {
-		hubProblem(w, 400, "invalid_request", "请填写 Hub 地址和用户名。")
-		return
-	}
-	base, e := h.validateHub(v.URL)
-	if e != nil {
-		message := "请输入 Hub 的 HTTP 或 HTTPS 根地址（不含路径、查询参数或账号信息）。"
-		if !h.server.options.HubAllowHTTP {
-			message = "请输入 Hub 的 HTTPS 根地址（不含路径、查询参数或账号信息）。"
-		}
-		hubProblem(w, 400, "invalid_hub_url", message)
-		return
-	}
-	username := strings.ToLower(strings.TrimSpace(v.Username))
-	valid := len(username) >= 3 && len(username) <= 64
-	for i, b := range []byte(username) {
-		if !((b >= 'a' && b <= 'z') || (b >= '0' && b <= '9') || (i > 0 && (b == '_' || b == '-' || b == '.'))) {
-			valid = false
-		}
-	}
-	if !valid {
-		hubProblem(w, 400, "invalid_username", "用户名需要 3–64 位字母、数字、点、短横线或下划线，且以字母或数字开头。")
-		return
-	}
-	h.managementMu.Lock()
-	defer h.managementMu.Unlock()
-	h.mu.Lock()
-	binding := h.binding
-	if binding.Instance != "" {
-		h.mu.Unlock()
-		if binding.URL != base || binding.Username != username {
-			hubProblem(w, 409, "already_bound", "此 GoTTY 已接入 Hub，请先在原 Hub 解绑。")
-			return
-		}
-		_ = json.NewEncoder(w).Encode(map[string]bool{"ok": true})
-		return
-	}
-	if binding.URL != base || binding.Username != username || binding.RequestID == "" || binding.Claim == "" {
-		host, _ := os.Hostname()
-		if host == "" {
-			host = "gotty"
-		}
-		if len(host) > 64 {
-			host = host[:64]
-		}
-		requestID := hubRandom()
-		previous := binding
-		binding = hubBinding{URL: base, Username: username, Name: host + "-" + requestID[:8], RequestID: requestID, Claim: hubRandom()}
-		h.binding = binding
-		if e := h.saveLocked(); e != nil {
-			h.binding = previous
-			h.mu.Unlock()
-			hubProblem(w, 500, "save_failed", "无法保存 Hub 配置，请检查本地文件权限。")
-			return
-		}
-	}
-	h.mu.Unlock()
-	res, e := h.request(r.Context(), base, "/api/v1/instances/register", map[string]string{"username": username, "name": binding.Name, "request_id": binding.RequestID, "claim": binding.Claim})
-	if e != nil {
-		var remote *hubHTTPError
-		if errors.As(e, &remote) {
-			switch remote.code {
-			case "user_not_found":
-				hubProblem(w, 404, remote.code, "该用户名尚未在此 Hub 注册，请先前往 Hub Web 注册，再重试接入。")
-			case "invalid_username":
-				hubProblem(w, 400, remote.code, "Hub 不接受此用户名。")
-			case "rate_limit":
-				hubProblem(w, 429, remote.code, "接入请求过于频繁，请稍后重试。")
-			case "registration_expired":
-				h.mu.Lock()
-				previous := h.binding
-				if h.binding == binding {
-					h.binding.Claim = ""
-					h.binding.RequestID = ""
-				}
-				saveErr := h.saveLocked()
-				if saveErr != nil {
-					h.binding = previous
-				}
-				h.mu.Unlock()
-				if saveErr != nil {
-					hubProblem(w, 500, "save_failed", "无法保存重试状态，请检查本地文件权限。")
-					return
-				}
-				hubProblem(w, 409, remote.code, "此接入申请已失效，再次点击接入即可重新注册。")
-			default:
-				hubProblem(w, 502, "hub_rejected", "Hub 拒绝接入，请确认地址及 Hub 版本。")
-			}
-		} else {
-			hubProblem(w, 502, "hub_unavailable", "无法连接 Hub，请检查地址和网络后重试。")
-		}
-		return
-	}
-	next := binding
-	next.Instance = hubString(res, "instance_id")
-	next.Credential = hubString(res, "credential")
-	var protocol int
-	_ = json.Unmarshal(res["protocol"], &protocol)
-	secret, decodeErr := hex.DecodeString(next.Credential)
-	if next.Instance == "" || strings.ContainsAny(next.Instance, "/?#") || protocol != 1 || decodeErr != nil || len(secret) != 32 {
-		hubProblem(w, 502, "invalid_hub_response", "Hub 返回的设备信息无效。")
-		return
-	}
-	next.Claim = ""
-	next.RequestID = ""
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	if h.binding != binding {
-		hubProblem(w, 409, "binding_changed", "配置已变更，请重试。")
-		return
-	}
-	h.binding = next
-	if e := h.saveLocked(); e != nil {
-		h.binding = binding
-		hubProblem(w, 500, "save_failed", "无法保存设备凭据，请检查本地文件权限后重试。")
-		return
-	}
-	select {
-	case h.wake <- struct{}{}:
-	default:
-	}
-	_ = json.NewEncoder(w).Encode(map[string]bool{"ok": true})
 }
 func (h *hubManager) setViewing(id string, viewing bool) {
 	h.mu.Lock()
@@ -402,7 +267,7 @@ func (h *hubManager) run() {
 		h.mu.Lock()
 		b := h.binding
 		h.mu.Unlock()
-		if b.Instance != "" {
+		if b.Instance != "" && !b.Paused {
 			e := h.connect(b)
 			h.mu.Lock()
 			h.online = false
@@ -442,6 +307,16 @@ func (h *hubManager) run() {
 	}
 }
 func (h *hubManager) connect(b hubBinding) error {
+	ctx, cancel := context.WithCancel(h.ctx)
+	defer cancel()
+	h.mu.Lock()
+	if h.binding.Instance != b.Instance || h.binding.Paused {
+		h.mu.Unlock()
+		return nil
+	}
+	h.connectionCancel = cancel
+	h.mu.Unlock()
+	defer func() { h.mu.Lock(); h.connectionCancel = nil; h.mu.Unlock() }()
 	if _, e := h.validateHub(b.URL); e != nil {
 		return e
 	}
@@ -455,14 +330,12 @@ func (h *hubManager) connect(b hubBinding) error {
 	headers := http.Header{}
 	headers.Set("X-Instance-ID", b.Instance)
 	headers.Set("Authorization", "Bearer "+b.Credential)
-	c, _, e := websocket.DefaultDialer.DialContext(h.ctx, u.String(), headers)
+	c, _, e := websocket.DefaultDialer.DialContext(ctx, u.String(), headers)
 	if e != nil {
 		return e
 	}
 	defer c.Close()
 	c.SetReadLimit(hubMaxMessage)
-	ctx, cancel := context.WithCancel(h.ctx)
-	defer cancel()
 	out := make(chan hubFrame, 128)
 	send := func(f hubFrame) bool {
 		select {
@@ -491,7 +364,7 @@ func (h *hubManager) connect(b hubBinding) error {
 			}
 		}
 	}()
-	data, _ := json.Marshal(map[string]any{"protocol": 1, "capabilities": map[string]bool{"write": h.server.options.PermitWrite, "replay": true, "files": h.server.options.PermitWrite, "asr": h.server.options.EnableASR}})
+	data, _ := json.Marshal(map[string]any{"protocol": 1, "capabilities": map[string]bool{"write": h.server.options.PermitWrite, "replay": true, "files": h.server.options.PermitWrite, "asr": h.server.options.EnableASR, "controls": true}})
 	send(hubFrame{Kind: "hello", Data: data})
 	var first hubFrame
 	c.SetReadDeadline(time.Now().Add(10 * time.Second))
@@ -505,6 +378,10 @@ func (h *hubManager) connect(b hubBinding) error {
 		return errors.New("protocol rejected")
 	}
 	h.mu.Lock()
+	if ctx.Err() != nil || h.binding.Instance != b.Instance || h.binding.Paused {
+		h.mu.Unlock()
+		return ctx.Err()
+	}
 	h.online = true
 	h.revision = 0
 	h.mu.Unlock()
@@ -515,6 +392,8 @@ func (h *hubManager) connect(b hubBinding) error {
 		}
 	}()
 	clients := map[string]*Client{}
+	roles := map[string]string{}
+	controlBusy := make(chan struct{}, 1)
 	defer func() {
 		for _, client := range clients {
 			select {
@@ -548,6 +427,9 @@ func (h *hubManager) connect(b hubBinding) error {
 		if e = c.ReadJSON(&f); e != nil {
 			return e
 		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		switch f.Kind {
 		case "superseded":
 			return errHubSuperseded
@@ -567,6 +449,12 @@ func (h *hubManager) connect(b hubBinding) error {
 				return errors.New("bad rotation")
 			}
 			h.mu.Lock()
+			// A frame queued by the old Hub must not replace the credential of
+			// a newly saved binding while that old connection is closing.
+			if h.binding.Instance != b.Instance || h.binding.URL != b.URL {
+				h.mu.Unlock()
+				return errors.New("binding replaced")
+			}
 			previous := h.binding
 			h.binding.Credential = v.Credential
 			e = h.saveLocked()
@@ -654,12 +542,36 @@ func (h *hubManager) connect(b hubBinding) error {
 				return ctx.Err()
 			}
 			clients[f.Stream] = client
+			roles[f.Stream] = v.Role
 			select {
 			case <-client.ready:
 			case <-ctx.Done():
 				return ctx.Err()
 			}
 			go h.forward(ctx, f.Stream, client, send)
+		case "control":
+			if clients[f.Stream] == nil || len(f.Data) > maxShareAPIBodySize {
+				return errors.New("invalid terminal control")
+			}
+			var req hubControlRequest
+			if json.Unmarshal(f.Data, &req) != nil || req.ID == "" || len(req.ID) > 64 {
+				return errors.New("bad terminal control")
+			}
+			select {
+			case controlBusy <- struct{}{}:
+				go func(stream, role string, req hubControlRequest) {
+					defer func() { <-controlBusy }()
+					if ctx.Err() != nil {
+						return
+					}
+					result := h.terminalControl(role, req)
+					body, _ := json.Marshal(result)
+					send(hubFrame{Kind: "control_result", Stream: stream, Data: body})
+				}(f.Stream, roles[f.Stream], req)
+			default:
+				body, _ := json.Marshal(hubControlResult{ID: req.ID, Error: "Another terminal operation is running"})
+				send(hubFrame{Kind: "control_result", Stream: f.Stream, Data: body})
+			}
 		case "asr_data":
 			upstream := asr[f.Stream]
 			if upstream == nil {
@@ -715,6 +627,7 @@ func (h *hubManager) connect(b hubBinding) error {
 					return ctx.Err()
 				}
 				delete(clients, f.Stream)
+				delete(roles, f.Stream)
 			}
 			h.mu.Lock()
 			delete(h.leases, f.Stream)
@@ -730,6 +643,9 @@ func (h *hubManager) forward(ctx context.Context, id string, c *Client, send fun
 		return send(hubFrame{Kind: "data", Stream: id, Data: b})
 	}
 	marshal := func(prefix byte, v any) bool { b, _ := json.Marshal(v); return emit(append([]byte{prefix}, b...)) }
+	if !marshal('4', h.terminalPreferences(c)) || !marshal('6', 16384) {
+		return
+	}
 	r := c.replay
 	marshal('a', replayBeginPayload{Epoch: r.Epoch, Mode: r.Mode, FromOffset: r.FromOffset})
 	if r.Mode != "resume" {
@@ -745,7 +661,6 @@ func (h *hubManager) forward(ctx context.Context, id string, c *Client, send fun
 		}
 	}
 	marshal('b', replayEndPayload{EndOffset: r.EndOffset})
-	marshal('4', map[string]any{"client-id": c.id})
 	for {
 		select {
 		case m, ok := <-c.send:

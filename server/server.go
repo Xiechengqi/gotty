@@ -194,6 +194,7 @@ func (server *Server) Run(ctx context.Context, options ...RunOption) error {
 		if err != nil {
 			return errors.Wrap(err, "initialize Hub connector")
 		}
+		server.hub.cancelRun = cancel
 		go server.hub.run()
 	}
 	go server.sessionManager.Run()
