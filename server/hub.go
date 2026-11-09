@@ -1,6 +1,6 @@
 package server
 
-// Hub binds this process' SessionManager directly to a terminal-only WSS transport.
+// Hub binds this process' SessionManager directly to a terminal-only WebSocket transport.
 // It deliberately never accepts a proxy target or connects to local HTTP endpoints.
 import (
 	"bytes"
@@ -206,7 +206,11 @@ func (h *hubManager) handler(w http.ResponseWriter, r *http.Request) {
 	}
 	base, e := h.validateHub(v.URL)
 	if e != nil {
-		hubProblem(w, 400, "invalid_hub_url", "请输入 Hub 的 HTTPS 根地址；本地开发可启用 --hub-allow-http。")
+		message := "请输入 Hub 的 HTTP 或 HTTPS 根地址（不含路径、查询参数或账号信息）。"
+		if !h.server.options.HubAllowHTTP {
+			message = "请输入 Hub 的 HTTPS 根地址（不含路径、查询参数或账号信息）。"
+		}
+		hubProblem(w, 400, "invalid_hub_url", message)
 		return
 	}
 	username := strings.ToLower(strings.TrimSpace(v.Username))

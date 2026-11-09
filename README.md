@@ -49,7 +49,7 @@ https://gotty-<suffix>.httptunnel.top
 
 绑定及设备凭据默认保存在权限 `0600` 的 `~/.gotty/hub.json`，可通过 `--hub-state-file` 修改。已有 GoTTY 密码时自动复用登录态；无密码且启用 Hub 时，主站访问者可以配置绑定，公开分享页面不能查看或管理 Hub 配置。设备请求失败可直接重试，不需要验证码、Hub 密码或额外管理令牌。
 
-GoTTY 主动通过 WSS 连接 Hub，终端直接复用本地 PTY 会话；Hub 连接不代理本地 HTTP 地址。状态点在本地页面和 Hub 间同步：红色为正在查看、黄色为未查看时有新输出、绿色为输出已停止但尚未查看、灰色为无未读输出。仅本地开发可使用 `--hub-allow-http` 允许 HTTP Hub。
+GoTTY 默认支持 HTTP 和 HTTPS Hub，分别主动通过 WS 或 WSS 连接，终端直接复用本地 PTY 会话；Hub 连接不代理本地 HTTP 地址。状态点在本地页面和 Hub 间同步：红色为正在查看、黄色为未查看时有新输出、绿色为输出已停止但尚未查看、灰色为无未读输出。可用 `--hub-allow-http=false` 仅允许 HTTPS Hub。
 
 ## 特性
 
@@ -219,7 +219,7 @@ curl -X POST \
 
 ## 配置文件
 
-默认配置路径是 `~/.gotty`，也可以用 `--config` 或 `GOTTY_CONFIG` 指定。命令行 flag 对应环境变量采用 `GOTTY_` 前缀，例如 `--permit-write` 对应 `GOTTY_PERMIT_WRITE`。
+默认配置路径是 `~/.gotty`；如果它是目录（例如启用 Hub 后），则读取 `~/.gotty/config`，文件不存在时使用默认值。也可以用 `--config` 或 `GOTTY_CONFIG` 指定其他配置文件。命令行 flag 对应环境变量采用 `GOTTY_` 前缀，例如 `--permit-write` 对应 `GOTTY_PERMIT_WRITE`。
 
 示例：
 
@@ -303,7 +303,8 @@ curl -H 'Authorization: Bearer user:pass' http://127.0.0.1:8080/api/v1/status
 
 | 路径 | 用途 |
 | --- | --- |
-| `~/.gotty` | 默认 HCL 配置文件 |
+| `~/.gotty` / `~/.gotty/config` | 默认 HCL 配置文件；前者为目录时使用后者 |
+| `~/.gotty/hub.json` | Hub 绑定和设备凭据 |
 | `~/.gotty-http-tunnel` | Share Manager 的 http-tunnel-client 运行态目录 |
 | `~/.gotty-shares.json` | share 历史、状态、owner 和访问模式记录 |
 | `bindata/static/` | 嵌入 gotty binary 的前端静态资源 |

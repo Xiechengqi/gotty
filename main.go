@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 
@@ -44,7 +45,7 @@ func main() {
 		&cli.StringFlag{
 			Name:    "config",
 			Value:   "~/.gotty",
-			Usage:   "Config file path",
+			Usage:   "Config file path (~/.gotty/config when ~/.gotty is a directory)",
 			EnvVars: []string{"GOTTY_CONFIG"},
 		},
 	)
@@ -56,12 +57,8 @@ func main() {
 			exit(fmt.Errorf("%s", msg), 1)
 		}
 
-		configFile := c.String("config")
-		_, err := os.Stat(homedir.Expand(configFile))
-		if configFile != "~/.gotty" || !os.IsNotExist(err) {
-			if err := utils.ApplyConfigFile(configFile, appOptions, backendOptions); err != nil {
-				exit(err, 2)
-			}
+		if err := applyConfigFile(c.String("config"), appOptions, backendOptions); err != nil {
+			exit(err, 2)
 		}
 
 		utils.ApplyFlags(cliFlags, flagMappings, c, appOptions, backendOptions)
@@ -133,6 +130,25 @@ func main() {
 		return nil
 	}
 	app.Run(os.Args)
+}
+
+func applyConfigFile(path string, options ...interface{}) error {
+	if path == "~/.gotty" {
+		info, err := os.Stat(homedir.Expand(path))
+		if os.IsNotExist(err) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			path = filepath.Join(path, "config")
+			if _, err := os.Stat(homedir.Expand(path)); os.IsNotExist(err) {
+				return nil
+			}
+		}
+	}
+	return utils.ApplyConfigFile(path, options...)
 }
 
 func exit(err error, code int) {

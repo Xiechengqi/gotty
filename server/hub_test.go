@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/sorenisanerd/gotty/utils"
 )
 
 func TestHubManagementFollowsLocalControl(t *testing.T) {
@@ -36,17 +38,26 @@ func TestHubManagementFollowsLocalControl(t *testing.T) {
 	}
 }
 func TestHubOriginsAreTerminalOnly(t *testing.T) {
-	h := &hubManager{server: &Server{options: &Options{}}}
-	for _, raw := range []string{"http://hub.example", "https://user:secret@hub.example", "https://hub.example/target", "https://hub.example?url=http://localhost"} {
+	options := &Options{}
+	if err := utils.ApplyDefaultValues(options); err != nil {
+		t.Fatal(err)
+	}
+	h := &hubManager{server: &Server{options: options}}
+	for _, raw := range []string{"ftp://hub.example", "https://user:secret@hub.example", "https://hub.example/target", "https://hub.example?url=http://localhost", "http://hub.example/#fragment"} {
 		if _, e := h.validateHub(raw); e == nil {
 			t.Errorf("accepted %q", raw)
 		}
 	}
-	if _, e := h.validateHub("https://hub.example"); e != nil {
-		t.Fatal(e)
+	for _, raw := range []string{"https://hub.example", "http://hub.example", "http://127.0.0.1:8088"} {
+		if _, e := h.validateHub(raw); e != nil {
+			t.Errorf("default settings rejected %q: %v", raw, e)
+		}
 	}
-	h.server.options.HubAllowHTTP = true
-	if _, e := h.validateHub("http://127.0.0.1:8088"); e != nil {
+	h.server.options.HubAllowHTTP = false
+	if _, e := h.validateHub("http://hub.example"); e == nil {
+		t.Fatal("HTTPS-only setting accepted HTTP")
+	}
+	if _, e := h.validateHub("https://hub.example"); e != nil {
 		t.Fatal(e)
 	}
 }
@@ -140,7 +151,11 @@ func TestHubRegistrationSaveFailureCanRetrySameRequest(t *testing.T) {
 		fmt.Fprintf(w, `{"instance_id":"instance","credential":"%s","protocol":1}`, strings.Repeat("a", 64))
 	}))
 	defer hub.Close()
-	h = &hubManager{server: &Server{options: &Options{HubAllowHTTP: true}}, path: originalPath, wake: make(chan struct{}, 1)}
+	options := &Options{}
+	if err := utils.ApplyDefaultValues(options); err != nil {
+		t.Fatal(err)
+	}
+	h = &hubManager{server: &Server{options: options}, path: originalPath, wake: make(chan struct{}, 1)}
 	submit := func() *httptest.ResponseRecorder {
 		r := httptest.NewRequest("POST", "http://localhost/-/hub", strings.NewReader(fmt.Sprintf(`{"URL":%q,"Username":"owner"}`, hub.URL)))
 		r.Header.Set("Content-Type", "application/json")
