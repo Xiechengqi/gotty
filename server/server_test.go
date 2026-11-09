@@ -29,9 +29,10 @@ func (f *mockFactory) New(params map[string][]string, headers map[string][]strin
 func TestMultiInterfaceBinding_SingleAddress(t *testing.T) {
 	// Backward compat: a single address (no comma) should work as before
 	opts := &Options{
-		Address: "127.0.0.1",
-		Port:    "0",
-		Quiet:   true,
+		HubDisabled: true,
+		Address:     "127.0.0.1",
+		Port:        "0",
+		Quiet:       true,
 	}
 
 	server, err := New(&mockFactory{}, opts)
@@ -62,9 +63,10 @@ func TestMultiInterfaceBinding_SingleAddress(t *testing.T) {
 func TestMultiInterfaceBinding_MultipleAddresses(t *testing.T) {
 	// Test binding to 127.0.0.1 on a random port — verify server starts
 	opts := &Options{
-		Address: "127.0.0.1",
-		Port:    "0",
-		Quiet:   true,
+		HubDisabled: true,
+		Address:     "127.0.0.1",
+		Port:        "0",
+		Quiet:       true,
 	}
 
 	server, err := New(&mockFactory{}, opts)
@@ -94,9 +96,10 @@ func TestMultiInterfaceBinding_MultipleAddresses(t *testing.T) {
 
 func TestMultiInterfaceBinding_InvalidAddress(t *testing.T) {
 	opts := &Options{
-		Address: "999.999.999.999",
-		Port:    "8080",
-		Quiet:   true,
+		HubDisabled: true,
+		Address:     "999.999.999.999",
+		Port:        "8080",
+		Quiet:       true,
 	}
 
 	server, err := New(&mockFactory{}, opts)
@@ -120,9 +123,10 @@ func TestMultiInterfaceBinding_OneAddressFails(t *testing.T) {
 	// When one address in a comma-separated list is invalid, the entire
 	// server should fail and close any already-opened listeners.
 	opts := &Options{
-		Address: "127.0.0.1,999.999.999.999",
-		Port:    "0",
-		Quiet:   true,
+		HubDisabled: true,
+		Address:     "127.0.0.1,999.999.999.999",
+		Port:        "0",
+		Quiet:       true,
 	}
 
 	server, err := New(&mockFactory{}, opts)
@@ -145,9 +149,10 @@ func TestMultiInterfaceBinding_OneAddressFails(t *testing.T) {
 func TestMultiInterfaceBinding_AddressTrimming(t *testing.T) {
 	// Spaces around addresses should be trimmed
 	opts := &Options{
-		Address: " 127.0.0.1 ",
-		Port:    "0",
-		Quiet:   true,
+		HubDisabled: true,
+		Address:     " 127.0.0.1 ",
+		Port:        "0",
+		Quiet:       true,
 	}
 
 	server, err := New(&mockFactory{}, opts)

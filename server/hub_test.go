@@ -61,6 +61,63 @@ func TestHubOriginsAreTerminalOnly(t *testing.T) {
 		t.Fatal(e)
 	}
 }
+
+func TestHubConfigIsEnabledByDefaultAndCanBeDisabled(t *testing.T) {
+	for _, disabled := range []bool{false, true} {
+		s := &Server{options: &Options{HubDisabled: disabled}}
+		r := httptest.NewRequest("GET", "http://localhost/config.js", nil)
+		w := httptest.NewRecorder()
+		s.handleConfig(w, r)
+		want := fmt.Sprintf("var gotty_hub_enabled = %t;", !disabled)
+		if !strings.Contains(w.Body.String(), want) {
+			t.Fatalf("HubDisabled=%t: config.js missing %q", disabled, want)
+		}
+	}
+}
+
+func TestHubDefaultStateSurvivesReloadWithEitherConfigLayout(t *testing.T) {
+	for _, legacyConfig := range []bool{false, true} {
+		t.Run(fmt.Sprintf("legacyConfig=%t", legacyConfig), func(t *testing.T) {
+			taskHome := t.TempDir()
+			t.Setenv("HOME", taskHome)
+			configPath := filepath.Join(taskHome, ".gotty")
+			config := []byte(`port = "2222"`)
+			wantPath := filepath.Join(configPath, "hub.json")
+			if legacyConfig {
+				if err := os.WriteFile(configPath, config, 0600); err != nil {
+					t.Fatal(err)
+				}
+				wantPath = filepath.Join(taskHome, ".gotty-hub.json")
+			}
+			s := &Server{options: &Options{}}
+			h, err := newHubManager(context.Background(), s)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if h.path != wantPath {
+				t.Fatalf("state path = %q, want %q", h.path, wantPath)
+			}
+			h.binding = hubBinding{URL: "http://hub.example", Instance: "instance", Username: "owner", Credential: "secret"}
+			if err := h.saveLocked(); err != nil {
+				t.Fatal(err)
+			}
+			reloaded, err := newHubManager(context.Background(), s)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if reloaded.binding != h.binding {
+				t.Fatal("default Hub binding was not restored")
+			}
+			if legacyConfig {
+				got, err := os.ReadFile(configPath)
+				if err != nil || string(got) != string(config) {
+					t.Fatal("legacy config file was modified")
+				}
+			}
+		})
+	}
+}
+
 func TestHubActivityAndViewingState(t *testing.T) {
 	h := &hubManager{leases: map[string]time.Time{}, color: "gray"}
 	check := func(want string) {
@@ -219,7 +276,6 @@ func TestHubUnknownUserAndCrossSiteRegistration(t *testing.T) {
 
 func TestHubManagementRejectsPublicShares(t *testing.T) {
 	server := newShareAccessTestServer(t, ShareRecord{Passwordless: true})
-	server.options.HubEnabled = true
 	h := &hubManager{server: server}
 	for _, forwarded := range []bool{false, true} {
 		r := httptest.NewRequest("GET", "https://gotty-demo.httptunnel.top/config.js", nil)

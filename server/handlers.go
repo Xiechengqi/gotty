@@ -441,7 +441,7 @@ func (server *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		"var gotty_enable_asr = " + strconv.FormatBool(enableASR) + ";",
 		"var gotty_asr_hold_ms = " + strconv.Itoa(server.options.ASRHoldMs) + ";",
 		"var gotty_asr_hotkey = '" + server.options.ASRHotkey + "';",
-		"var gotty_hub_enabled = " + strconv.FormatBool(server.options.HubEnabled && !server.isPublicShareRequest(r)) + ";",
+		"var gotty_hub_enabled = " + strconv.FormatBool(!server.options.HubDisabled && !server.isPublicShareRequest(r)) + ";",
 		"var gotty_resize_policy = '" + server.options.ResizePolicy + "';",
 		"var gotty_resize_debounce_ms = " + strconv.Itoa(server.options.ResizeDebounceMs) + ";",
 		"var gotty_resize_min_cols = " + strconv.Itoa(server.options.MinCols) + ";",

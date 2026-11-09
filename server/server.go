@@ -189,7 +189,7 @@ func (server *Server) Run(ctx context.Context, options ...RunOption) error {
 		}
 	}
 
-	if server.options.HubEnabled {
+	if !server.options.HubDisabled {
 		server.hub, err = newHubManager(cctx, server)
 		if err != nil {
 			return errors.Wrap(err, "initialize Hub connector")

@@ -5,7 +5,7 @@ import (
 )
 
 type Options struct {
-	HubEnabled   bool   `hcl:"hub_enabled" flagName:"hub-enabled" flagDescribe:"Enable GoTTY Hub registration and connector" default:"false"`
+	HubDisabled  bool   `hcl:"hub_disabled" flagName:"hub-disabled" flagDescribe:"Disable GoTTY Hub registration and connector (enabled by default)" default:"false"`
 	HubStateFile string `hcl:"hub_state_file" flagName:"hub-state-file" flagDescribe:"Private Hub binding and device credential file" default:"~/.gotty/hub.json"`
 	HubAllowHTTP bool   `hcl:"hub_allow_http" flagName:"hub-allow-http" flagDescribe:"Allow HTTP Hub addresses as well as HTTPS (set false to require HTTPS)" default:"true"`
 

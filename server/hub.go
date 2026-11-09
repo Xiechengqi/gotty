@@ -69,7 +69,17 @@ func hubRandom() string {
 	return hex.EncodeToString(b)
 }
 func newHubManager(ctx context.Context, s *Server) (*hubManager, error) {
-	p := homedir.Expand(s.options.HubStateFile)
+	stateFile := s.options.HubStateFile
+	if stateFile == "" {
+		stateFile = "~/.gotty/hub.json"
+	}
+	p := homedir.Expand(stateFile)
+	// Keep the legacy ~/.gotty config file usable when Hub is enabled by default.
+	if stateFile == "~/.gotty/hub.json" {
+		if info, err := os.Stat(filepath.Dir(p)); err == nil && !info.IsDir() {
+			p = homedir.Expand("~/.gotty-hub.json")
+		}
+	}
 	if e := os.MkdirAll(filepath.Dir(p), 0700); e != nil {
 		return nil, e
 	}

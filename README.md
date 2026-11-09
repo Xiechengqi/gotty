@@ -45,9 +45,9 @@ https://gotty-<suffix>.httptunnel.top
 
 ## 接入 GoTTY Hub
 
-使用 `gotty --hub-enabled --permit-write bash` 启动后，点击终端页面右上角“接入 Hub”，只填写 Hub 的 HTTPS 地址和已注册的用户名，一次提交完成接入；实例名自动生成。用户名不存在时，页面提示先到 Hub Web 注册并提供链接。默认不启用 Hub；`--permit-write` 仍控制远程终端是否可写，观察者始终只读。
+使用 `gotty --permit-write bash` 启动后，点击终端页面右上角“接入 Hub”，只填写 Hub 的 HTTP(S) 地址和已注册的用户名，一次提交完成接入；实例名自动生成。用户名不存在时，页面提示先到 Hub Web 注册并提供链接。Hub 默认开启，可用 `--hub-disabled` 关闭（环境变量 `GOTTY_HUB_DISABLED=true` 或配置 `hub_disabled = true`）；`--permit-write` 仍控制远程终端是否可写，观察者始终只读。
 
-绑定及设备凭据默认保存在权限 `0600` 的 `~/.gotty/hub.json`，可通过 `--hub-state-file` 修改。已有 GoTTY 密码时自动复用登录态；无密码且启用 Hub 时，主站访问者可以配置绑定，公开分享页面不能查看或管理 Hub 配置。设备请求失败可直接重试，不需要验证码、Hub 密码或额外管理令牌。
+绑定及设备凭据默认保存在权限 `0600` 的 `~/.gotty/hub.json`；若 `~/.gotty` 是已有配置文件，则使用 `~/.gotty-hub.json`，可通过 `--hub-state-file` 修改。已有 GoTTY 密码时自动复用登录态；无密码且启用 Hub 时，主站访问者可以配置绑定，公开分享页面不能查看或管理 Hub 配置。设备请求失败可直接重试，不需要验证码、Hub 密码或额外管理令牌。
 
 GoTTY 默认支持 HTTP 和 HTTPS Hub，分别主动通过 WS 或 WSS 连接，终端直接复用本地 PTY 会话；Hub 连接不代理本地 HTTP 地址。状态点在本地页面和 Hub 间同步：红色为正在查看、黄色为未查看时有新输出、绿色为输出已停止但尚未查看、灰色为无未读输出。可用 `--hub-allow-http=false` 仅允许 HTTPS Hub。
 
@@ -304,7 +304,7 @@ curl -H 'Authorization: Bearer user:pass' http://127.0.0.1:8080/api/v1/status
 | 路径 | 用途 |
 | --- | --- |
 | `~/.gotty` / `~/.gotty/config` | 默认 HCL 配置文件；前者为目录时使用后者 |
-| `~/.gotty/hub.json` | Hub 绑定和设备凭据 |
+| `~/.gotty/hub.json` | Hub 绑定和设备凭据；`~/.gotty` 为文件时使用 `~/.gotty-hub.json` |
 | `~/.gotty-http-tunnel` | Share Manager 的 http-tunnel-client 运行态目录 |
 | `~/.gotty-shares.json` | share 历史、状态、owner 和访问模式记录 |
 | `bindata/static/` | 嵌入 gotty binary 的前端静态资源 |

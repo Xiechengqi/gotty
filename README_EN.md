@@ -213,7 +213,7 @@ curl -X POST \
 
 The default config path is `~/.gotty`. If it is a directory (for example after enabling Hub), GoTTY reads `~/.gotty/config`; a missing default config uses the built-in defaults. Use `--config` or `GOTTY_CONFIG` to specify another file. Flags also map to environment variables with a `GOTTY_` prefix, for example `--permit-write` maps to `GOTTY_PERMIT_WRITE`.
 
-Hub connections accept HTTP and HTTPS by default, using WS and WSS respectively. Set `--hub-allow-http=false` to require HTTPS.
+Hub is enabled by default. Use `--hub-disabled`, `GOTTY_HUB_DISABLED=true`, or `hub_disabled = true` in the config to disable it. Hub connections accept HTTP and HTTPS by default, using WS and WSS respectively. Set `--hub-allow-http=false` to require HTTPS.
 
 Example:
 
@@ -298,7 +298,7 @@ curl -H 'Authorization: Bearer user:pass' http://127.0.0.1:8080/api/v1/status
 | Path | Purpose |
 | --- | --- |
 | `~/.gotty` / `~/.gotty/config` | Default HCL configuration file; use the latter when the former is a directory |
-| `~/.gotty/hub.json` | Hub binding and device credentials |
+| `~/.gotty/hub.json` | Hub binding and device credentials; use `~/.gotty-hub.json` when `~/.gotty` is a file |
 | `~/.gotty-http-tunnel` | http-tunnel-client runtime directory used by Share Manager |
 | `~/.gotty-shares.json` | Share history, status, owner, and access-mode registry |
 | `bindata/static/` | Frontend assets embedded into the gotty binary |
