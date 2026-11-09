@@ -1,6 +1,6 @@
 {
   "name": "@gotty/terminal-core",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": false,
   "type": "module",
   "main": "webtty.ts",
@@ -9,12 +9,18 @@
     "webtty.ts",
     "LICENSE",
     "voice-input.ts",
-    "appearance.ts"
+    "appearance.ts",
+    "key-encoder.ts",
+    "keyboard-viewport.ts",
+    "mobile-key-layout.ts"
   ],
   "exports": {
     ".": "./webtty.ts",
     "./voice-input": "./voice-input.ts",
-    "./appearance": "./appearance.ts"
+    "./appearance": "./appearance.ts",
+    "./key-encoder": "./key-encoder.ts",
+    "./keyboard-viewport": "./keyboard-viewport.ts",
+    "./mobile-key-layout": "./mobile-key-layout.ts"
   },
   "license": "MIT"
 }
