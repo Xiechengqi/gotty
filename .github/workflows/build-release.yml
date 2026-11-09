@@ -122,10 +122,10 @@ jobs:
 
             ```bash
             # Linux AMD64
-            wget https://github.com/${{ github.repository }}/releases/download/latest/gotty-linux-amd64 -O gotty && chmod +x gotty
+            wget https://github.com/${{ github.repository }}/releases/download/latest/gotty-linux-amd64 -O /usr/local/bin/gotty && chmod +x /usr/local/bin/gotty
 
             # Linux ARM64
-            wget https://github.com/${{ github.repository }}/releases/download/latest/gotty-linux-arm64 -O gotty && chmod +x gotty
+            wget https://github.com/${{ github.repository }}/releases/download/latest/gotty-linux-arm64 -O /usr/local/bin/gotty && chmod +x /usr/local/bin/gotty
 
             ```
           files: release-files/*

@@ -66,6 +66,18 @@ The project implements an HTTP / WebSocket web terminal and sharing flow. It doe
 
 ## Quick Start
 
+Install on Linux amd64:
+
+```bash
+wget https://github.com/Xiechengqi/gotty/releases/download/latest/gotty-linux-amd64 -O /usr/local/bin/gotty && chmod +x /usr/local/bin/gotty
+```
+
+Install on Linux arm64:
+
+```bash
+wget https://github.com/Xiechengqi/gotty/releases/download/latest/gotty-linux-arm64 -O /usr/local/bin/gotty && chmod +x /usr/local/bin/gotty
+```
+
 Publish a read-only command:
 
 ```bash

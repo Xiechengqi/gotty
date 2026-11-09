@@ -74,6 +74,18 @@ GoTTY 主动通过 WSS 连接 Hub，终端直接复用本地 PTY 会话；Hub �
 
 ## 快速开始
 
+Linux amd64 安装：
+
+```bash
+wget https://github.com/Xiechengqi/gotty/releases/download/latest/gotty-linux-amd64 -O /usr/local/bin/gotty && chmod +x /usr/local/bin/gotty
+```
+
+Linux arm64 安装：
+
+```bash
+wget https://github.com/Xiechengqi/gotty/releases/download/latest/gotty-linux-arm64 -O /usr/local/bin/gotty && chmod +x /usr/local/bin/gotty
+```
+
 只读发布一个命令：
 
 ```bash
