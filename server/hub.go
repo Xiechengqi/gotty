@@ -39,7 +39,9 @@ type hubBinding struct {
 	URL        string `json:"url"`
 	Instance   string `json:"instance_id"`
 	Credential string `json:"credential"`
-	Enrollment string `json:"enrollment,omitempty"`
+	Username   string `json:"username"`
+	Name       string `json:"name,omitempty"`
+	RequestID  string `json:"request_id,omitempty"`
 	Claim      string `json:"claim,omitempty"`
 }
 type hubManager struct {
@@ -48,7 +50,7 @@ type hubManager struct {
 	mu           sync.Mutex
 	managementMu sync.Mutex
 	binding      hubBinding
-	path, admin  string
+	path         string
 	online       bool
 	leases       map[string]time.Time
 	lastOutput   time.Time
@@ -82,22 +84,6 @@ func newHubManager(ctx context.Context, s *Server) (*hubManager, error) {
 	} else if !os.IsNotExist(e) {
 		return nil, e
 	}
-	adminPath := p + ".admin"
-	b, e := os.ReadFile(adminPath)
-	if os.IsNotExist(e) {
-		b = []byte(hubRandom())
-		e = os.WriteFile(adminPath, b, 0600)
-	}
-	if e != nil {
-		return nil, e
-	}
-	if e = os.Chmod(adminPath, 0600); e != nil {
-		return nil, e
-	}
-	h.admin = strings.TrimSpace(string(b))
-	if len(h.admin) < 32 {
-		return nil, errors.New("invalid Hub admin token file")
-	}
 	return h, nil
 }
 func (h *hubManager) saveLocked() error {
@@ -125,12 +111,10 @@ func (h *hubManager) authorize(r *http.Request) bool {
 	if h.server.isPublicShareRequest(r) {
 		return false
 	}
-	if h.server.options.Credential != "" {
-		return h.server.authorizeControlRequest(r)
-	}
-	return constantTimeStringEqual(r.Header.Get("X-GoTTY-Hub-Admin"), h.admin)
+	return h.server.authorizeControlRequest(r)
 }
 func (h *hubManager) validateHub(raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
 	u, e := url.Parse(raw)
 	if e != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || strings.Trim(u.Path, "/") != "" {
 		return "", errors.New("Hub URL must be an origin")
@@ -154,7 +138,11 @@ func (h *hubManager) request(ctx context.Context, base, path string, body any) (
 	}
 	defer res.Body.Close()
 	if res.StatusCode/100 != 2 {
-		return nil, fmt.Errorf("Hub rejected request (%d)", res.StatusCode)
+		var problem struct {
+			Error string `json:"error"`
+		}
+		_ = json.NewDecoder(io.LimitReader(res.Body, 8192)).Decode(&problem)
+		return nil, &hubHTTPError{status: res.StatusCode, code: problem.Error}
 	}
 	var v map[string]json.RawMessage
 	e = json.NewDecoder(io.LimitReader(res.Body, 65536)).Decode(&v)
@@ -165,103 +153,164 @@ func hubString(v map[string]json.RawMessage, k string) string {
 	_ = json.Unmarshal(v[k], &s)
 	return s
 }
+
+type hubHTTPError struct {
+	status int
+	code   string
+}
+
+func (e *hubHTTPError) Error() string { return fmt.Sprintf("Hub rejected request (%d)", e.status) }
+func hubProblem(w http.ResponseWriter, status int, code, message string) {
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(map[string]string{"error": code, "message": message})
+}
 func (h *hubManager) handler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	if !h.authorize(r) {
-		http.Error(w, "Hub management requires administrator authentication", 403)
+		hubProblem(w, 403, "forbidden", "无权管理此 GoTTY 的 Hub 配置。")
 		return
 	}
 	if r.Method == "GET" {
 		h.mu.Lock()
-		v := map[string]any{"url": h.binding.URL, "instance_id": h.binding.Instance, "pending": h.binding.Enrollment != "", "online": h.online}
+		v := map[string]any{"url": h.binding.URL, "username": h.binding.Username, "instance_id": h.binding.Instance, "online": h.online}
 		h.mu.Unlock()
 		_ = json.NewEncoder(w).Encode(v)
 		return
 	}
 	if r.Method != "POST" {
-		http.Error(w, "method not allowed", 405)
+		hubProblem(w, 405, "method_not_allowed", "请求方法不支持。")
+		return
+	}
+	if !strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
+		hubProblem(w, 400, "invalid_request", "需要 JSON 请求。")
 		return
 	}
 	if origin := r.Header.Get("Origin"); origin != "" {
 		u, e := url.Parse(origin)
-		if e != nil || u.Host != r.Host {
-			http.Error(w, "origin rejected", 403)
+		if e != nil || u.Host != r.Host || (u.Scheme != "http" && u.Scheme != "https") {
+			hubProblem(w, 403, "forbidden", "请求来源不匹配。")
 			return
 		}
 	}
-	var v struct{ Action, URL, Name, Email, Code, Others string }
-	if e := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8192)).Decode(&v); e != nil {
-		http.Error(w, "invalid request", 400)
+	if r.Header.Get("Sec-Fetch-Site") == "cross-site" {
+		hubProblem(w, 403, "forbidden", "请求来源不匹配。")
+		return
+	}
+	var v struct{ URL, Username string }
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8192))
+	decoder.DisallowUnknownFields()
+	if e := decoder.Decode(&v); e != nil {
+		hubProblem(w, 400, "invalid_request", "请填写 Hub 地址和用户名。")
+		return
+	}
+	base, e := h.validateHub(v.URL)
+	if e != nil {
+		hubProblem(w, 400, "invalid_hub_url", "请输入 Hub 的 HTTPS 根地址；本地开发可启用 --hub-allow-http。")
+		return
+	}
+	username := strings.ToLower(strings.TrimSpace(v.Username))
+	valid := len(username) >= 3 && len(username) <= 64
+	for i, b := range []byte(username) {
+		if !((b >= 'a' && b <= 'z') || (b >= '0' && b <= '9') || (i > 0 && (b == '_' || b == '-' || b == '.'))) {
+			valid = false
+		}
+	}
+	if !valid {
+		hubProblem(w, 400, "invalid_username", "用户名需要 3–64 位字母、数字、点、短横线或下划线，且以字母或数字开头。")
 		return
 	}
 	h.managementMu.Lock()
 	defer h.managementMu.Unlock()
 	h.mu.Lock()
 	binding := h.binding
-	h.mu.Unlock()
-	previous := binding
-	switch v.Action {
-	case "enroll":
-		if binding.Instance != "" {
-			http.Error(w, "already bound", 409)
+	if binding.Instance != "" {
+		h.mu.Unlock()
+		if binding.URL != base || binding.Username != username {
+			hubProblem(w, 409, "already_bound", "此 GoTTY 已接入 Hub，请先在原 Hub 解绑。")
 			return
 		}
-		base, e := h.validateHub(v.URL)
-		if e != nil {
-			http.Error(w, e.Error(), 400)
-			return
-		}
-		claim := hubRandom()
-		grants := []map[string]string{}
-		for _, mail := range strings.Split(v.Others, ",") {
-			if mail = strings.TrimSpace(mail); mail != "" {
-				grants = append(grants, map[string]string{"email": mail, "role": "operator"})
-			}
-		}
-		res, e := h.request(r.Context(), base, "/api/v1/enrollments", map[string]any{"email": v.Email, "name": v.Name, "claim": claim, "grants": grants})
-		if e != nil {
-			http.Error(w, e.Error(), 502)
-			return
-		}
-		id := hubString(res, "id")
-		if id == "" || strings.ContainsAny(id, "/?#") {
-			http.Error(w, "invalid enrollment response", 502)
-			return
-		}
-		binding = hubBinding{URL: base, Enrollment: id, Claim: claim}
-	case "confirm":
-		if binding.Enrollment == "" {
-			http.Error(w, "no pending enrollment", 409)
-			return
-		}
-		res, e := h.request(r.Context(), binding.URL, "/api/v1/enrollments/"+binding.Enrollment+"/confirm", map[string]string{"code": v.Code, "claim": binding.Claim})
-		if e != nil {
-			http.Error(w, e.Error(), 400)
-			return
-		}
-		binding.Instance = hubString(res, "instance_id")
-		binding.Credential = hubString(res, "credential")
-		if binding.Instance == "" || len(binding.Credential) != 64 {
-			http.Error(w, "invalid confirmation response", 502)
-			return
-		}
-		binding.Enrollment = ""
-		binding.Claim = ""
-	default:
-		http.Error(w, "unsupported action", 400)
+		_ = json.NewEncoder(w).Encode(map[string]bool{"ok": true})
 		return
 	}
+	if binding.URL != base || binding.Username != username || binding.RequestID == "" || binding.Claim == "" {
+		host, _ := os.Hostname()
+		if host == "" {
+			host = "gotty"
+		}
+		if len(host) > 64 {
+			host = host[:64]
+		}
+		requestID := hubRandom()
+		previous := binding
+		binding = hubBinding{URL: base, Username: username, Name: host + "-" + requestID[:8], RequestID: requestID, Claim: hubRandom()}
+		h.binding = binding
+		if e := h.saveLocked(); e != nil {
+			h.binding = previous
+			h.mu.Unlock()
+			hubProblem(w, 500, "save_failed", "无法保存 Hub 配置，请检查本地文件权限。")
+			return
+		}
+	}
+	h.mu.Unlock()
+	res, e := h.request(r.Context(), base, "/api/v1/instances/register", map[string]string{"username": username, "name": binding.Name, "request_id": binding.RequestID, "claim": binding.Claim})
+	if e != nil {
+		var remote *hubHTTPError
+		if errors.As(e, &remote) {
+			switch remote.code {
+			case "user_not_found":
+				hubProblem(w, 404, remote.code, "该用户名尚未在此 Hub 注册，请先前往 Hub Web 注册，再重试接入。")
+			case "invalid_username":
+				hubProblem(w, 400, remote.code, "Hub 不接受此用户名。")
+			case "rate_limit":
+				hubProblem(w, 429, remote.code, "接入请求过于频繁，请稍后重试。")
+			case "registration_expired":
+				h.mu.Lock()
+				previous := h.binding
+				if h.binding == binding {
+					h.binding.Claim = ""
+					h.binding.RequestID = ""
+				}
+				saveErr := h.saveLocked()
+				if saveErr != nil {
+					h.binding = previous
+				}
+				h.mu.Unlock()
+				if saveErr != nil {
+					hubProblem(w, 500, "save_failed", "无法保存重试状态，请检查本地文件权限。")
+					return
+				}
+				hubProblem(w, 409, remote.code, "此接入申请已失效，再次点击接入即可重新注册。")
+			default:
+				hubProblem(w, 502, "hub_rejected", "Hub 拒绝接入，请确认地址及 Hub 版本。")
+			}
+		} else {
+			hubProblem(w, 502, "hub_unavailable", "无法连接 Hub，请检查地址和网络后重试。")
+		}
+		return
+	}
+	next := binding
+	next.Instance = hubString(res, "instance_id")
+	next.Credential = hubString(res, "credential")
+	var protocol int
+	_ = json.Unmarshal(res["protocol"], &protocol)
+	secret, decodeErr := hex.DecodeString(next.Credential)
+	if next.Instance == "" || strings.ContainsAny(next.Instance, "/?#") || protocol != 1 || decodeErr != nil || len(secret) != 32 {
+		hubProblem(w, 502, "invalid_hub_response", "Hub 返回的设备信息无效。")
+		return
+	}
+	next.Claim = ""
+	next.RequestID = ""
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if h.binding != previous {
-		http.Error(w, "binding changed; retry", 409)
+	if h.binding != binding {
+		hubProblem(w, 409, "binding_changed", "配置已变更，请重试。")
 		return
 	}
-	h.binding = binding
+	h.binding = next
 	if e := h.saveLocked(); e != nil {
-		h.binding = previous
-		http.Error(w, "cannot persist Hub binding", 500)
+		h.binding = binding
+		hubProblem(w, 500, "save_failed", "无法保存设备凭据，请检查本地文件权限后重试。")
 		return
 	}
 	select {

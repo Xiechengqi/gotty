@@ -45,9 +45,9 @@ https://gotty-<suffix>.httptunnel.top
 
 ## 接入 GoTTY Hub
 
-使用 `gotty --hub-enabled --permit-write bash` 启动后，点击终端页面右上角“接入 Hub”，填写 Hub 的 HTTPS 地址、实例名称和所有者邮箱，再输入邮箱验证码完成绑定。默认不启用 Hub；`--permit-write` 仍控制远程终端是否可写，观察者始终只读。
+使用 `gotty --hub-enabled --permit-write bash` 启动后，点击终端页面右上角“接入 Hub”，只填写 Hub 的 HTTPS 地址和已注册的用户名，一次提交完成接入；实例名自动生成。用户名不存在时，页面提示先到 Hub Web 注册并提供链接。默认不启用 Hub；`--permit-write` 仍控制远程终端是否可写，观察者始终只读。
 
-绑定及连接凭据默认保存在 `~/.gotty/hub.json`，可通过 `--hub-state-file` 修改。未配置 GoTTY 登录密码时，管理弹窗必须输入同路径加 `.admin` 后缀文件中的本机管理令牌；这些文件应作为敏感数据保管。已有密码时使用当前登录凭据授权，公开分享页面不能管理绑定。
+绑定及设备凭据默认保存在权限 `0600` 的 `~/.gotty/hub.json`，可通过 `--hub-state-file` 修改。已有 GoTTY 密码时自动复用登录态；无密码且启用 Hub 时，主站访问者可以配置绑定，公开分享页面不能查看或管理 Hub 配置。设备请求失败可直接重试，不需要验证码、Hub 密码或额外管理令牌。
 
 GoTTY 主动通过 WSS 连接 Hub，终端直接复用本地 PTY 会话；Hub 连接不代理本地 HTTP 地址。状态点在本地页面和 Hub 间同步：红色为正在查看、黄色为未查看时有新输出、绿色为输出已停止但尚未查看、灰色为无未读输出。仅本地开发可使用 `--hub-allow-http` 允许 HTTP Hub。
 
