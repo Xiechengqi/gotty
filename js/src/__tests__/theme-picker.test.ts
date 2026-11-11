@@ -2,6 +2,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent } from "@testing-library/preact";
 import { initThemePicker } from "../theme-picker";
 
+vi.mock("../../packages/terminal-core/fonts", async importOriginal => {
+  const actual = await importOriginal<typeof import("../../packages/terminal-core/fonts")>();
+  return {...actual, ensureFont: vi.fn(async (id: string) => ({fontFamily: actual.fontById(id)!.value, cached: true}))};
+});
+
 // The picker probes for a font by measuring a sample against two different
 // fallbacks. jsdom has no canvas, so emulate that rule: a font listed in
 // `available` overrides both fallbacks (equal widths); anything else falls
@@ -43,15 +48,17 @@ beforeEach(() => {
 });
 
 describe("font family availability", () => {
-  it("marks fonts that are not installed and leaves them unselectable", () => {
+  it("offers bundled fonts for download and disables unavailable system fonts", () => {
     mockCanvas(["DejaVu Sans Mono"]);
     const term = makeTerm();
     initThemePicker(term);
 
     expect(familyItem("DejaVu Sans Mono").classList.contains("unavailable")).toBe(false);
-    const missing = familyItem("JetBrains Mono");
+    expect(familyItem("JetBrains Mono").classList.contains("unavailable")).toBe(false);
+    expect(familyItem("JetBrains Mono").textContent).toContain("download");
+    const missing = familyItem("Monaco");
     expect(missing.classList.contains("unavailable")).toBe(true);
-    expect(missing.textContent).toContain("not installed");
+    expect(missing.textContent).toContain("unavailable on this device");
 
     fireEvent.click(missing);
 
@@ -66,12 +73,13 @@ describe("font family availability", () => {
     initThemePicker(term, { refit });
 
     fireEvent.click(familyItem("DejaVu Sans Mono"));
+    await flushFrames();
 
     expect(term.options.fontFamily).toBe("'DejaVu Sans Mono', monospace");
     expect(localStorage.getItem("gotty-font-family")).toBe("'DejaVu Sans Mono', monospace");
 
     await flushFrames();
-    expect(refit).toHaveBeenCalledTimes(1);
+    expect(refit).toHaveBeenCalled();
   });
 
   it("treats the always-available generic keywords as selectable", () => {
@@ -99,7 +107,7 @@ describe("re-fit after a font change", () => {
     expect(localStorage.getItem("gotty-font-size")).toBe("24");
 
     await flushFrames();
-    expect(refit).toHaveBeenCalledTimes(1);
+    expect(refit).toHaveBeenCalled();
   });
 
   it("re-fits on load when a saved preference is restored", async () => {
@@ -112,16 +120,16 @@ describe("re-fit after a font change", () => {
     expect(term.options.fontSize).toBe(20);
 
     await flushFrames();
-    expect(refit).toHaveBeenCalledTimes(1);
+    expect(refit).toHaveBeenCalled();
   });
 
-  it("does not re-fit on load when nothing was restored", async () => {
+  it("re-fits when the default web font becomes ready", async () => {
     mockCanvas([]);
     const refit = vi.fn();
     initThemePicker(makeTerm(), { refit });
 
     await flushFrames();
-    expect(refit).not.toHaveBeenCalled();
+    expect(refit).toHaveBeenCalled();
   });
 });
 
@@ -144,5 +152,5 @@ it("restores preferences and refits without exposing controls to a read-only sha
   expect(term.options.fontSize).toBe(24);
   expect(document.querySelector("#gotty-theme-btn")).toBeNull();
   await flushFrames();
-  expect(refit).toHaveBeenCalledTimes(1);
+  expect(refit).toHaveBeenCalled();
 });

@@ -16,12 +16,21 @@ module.exports = {
     },
     output: {
         path: path.resolve(__dirname, '../bindata/static/js/'),
+        assetModuleFilename: 'fonts/[name][ext]',
     },
     devtool: devtool,
     resolve: {
         extensions: [".ts", ".tsx", ".js"],
     },
-    plugins: [
+    plugins: [{apply(compiler) {
+        compiler.hooks.thisCompilation.tap('TerminalFontLicenses', compilation => {
+            compilation.hooks.processAssets.tap({name: 'TerminalFontLicenses', stage: compiler.webpack.Compilation.PROCESS_ASSETS_STAGE_ADDITIONAL}, () => {
+                const fs = require('fs'), directory = path.join(__dirname, 'packages/terminal-core/font-licenses');
+                for (const name of fs.readdirSync(directory)) compilation.emitAsset(`font-licenses/${name}`, new compiler.webpack.sources.RawSource(fs.readFileSync(path.join(directory, name))));
+                compilation.emitAsset('font-licenses/manifest.json', new compiler.webpack.sources.RawSource(fs.readFileSync(path.join(__dirname, 'packages/terminal-core/font-manifest.json'))));
+            });
+        });
+    }},
         new LicenseWebpackPlugin({
             licenseTextOverrides: {
                 // Preact ships jsx-runtime as a subpackage without its own license file.
@@ -31,6 +40,7 @@ module.exports = {
     ],
     module: {
         rules: [
+            { test: /\.woff2$/i, type: "asset/resource" },
             {
                 test: /\.tsx?$/,
                 loader: "esbuild-loader",

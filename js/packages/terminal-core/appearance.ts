@@ -1,17 +1,19 @@
+import {BUILTIN_THEMES} from "./themes";
+export {BUILTIN_THEMES} from "./themes";
 // Display defaults and preference translation shared by GoTTY and GoTTY Hub.
 // The complete theme catalogue is supplied by GoTTY, alongside its preferences.
 export const DEFAULT_THEME = "nord";
 export const DEFAULT_FONT_FAMILY = "'Source Code Pro', monospace";
 export const FONT_SIZES = [10, 12, 14, 16, 18, 20, 24];
 export const FONT_FAMILIES = [
-    { name: "DejaVu Sans Mono", value: "'DejaVu Sans Mono', monospace" },
-    { name: "JetBrains Mono", value: "'JetBrains Mono', monospace" },
-    { name: "Fira Code", value: "'Fira Code', monospace" },
-    { name: "Source Code Pro", value: DEFAULT_FONT_FAMILY },
-    { name: "Monaco", value: "Monaco, monospace" },
-    { name: "Menlo", value: "Menlo, monospace" },
-    { name: "Cascadia Code", value: "'Cascadia Code', monospace" },
-    { name: "monospace", value: "monospace" },
+    { id: "dejavu-sans-mono", name: "DejaVu Sans Mono", value: "'DejaVu Sans Mono', monospace" },
+    { id: "jetbrains-mono", name: "JetBrains Mono", value: "'JetBrains Mono', monospace" },
+    { id: "fira-code", name: "Fira Code", value: "'Fira Code', monospace" },
+    { id: "source-code-pro", name: "Source Code Pro", value: DEFAULT_FONT_FAMILY },
+    { id: "monaco", name: "Monaco", value: "Monaco, monospace" },
+    { id: "menlo", name: "Menlo", value: "Menlo, monospace" },
+    { id: "cascadia-code", name: "Cascadia Code", value: "'Cascadia Code', monospace" },
+    { id: "monospace", name: "monospace", value: "monospace" },
 ];
 
 export type ThemeMap = Record<string, Record<string, string>>;
@@ -28,13 +30,7 @@ export interface DisplayOptions {
 }
 
 // Also used before the remote configuration arrives and with older Connectors.
-export const NORD_THEME = {
-    foreground: "#d8dee9", background: "#2e3440", cursor: "#88c0d0", cursorAccent: "#2e3440",
-    selectionBackground: "#434c5e", black: "#3b4252", red: "#bf616a", green: "#a3be8c",
-    yellow: "#ebcb8b", blue: "#81a1c1", magenta: "#b48ead", cyan: "#88c0d0", white: "#e5e9f0",
-    brightBlack: "#4c566a", brightRed: "#bf616a", brightGreen: "#a3be8c", brightYellow: "#ebcb8b",
-    brightBlue: "#81a1c1", brightMagenta: "#b48ead", brightCyan: "#8fbcbb", brightWhite: "#eceff4",
-};
+export const NORD_THEME = xtermTheme(BUILTIN_THEMES.nord);
 
 export function defaultDisplayOptions(): DisplayOptions {
     return { fontSize: 14, fontFamily: DEFAULT_FONT_FAMILY, scrollback: 500, cursorBlink: false,

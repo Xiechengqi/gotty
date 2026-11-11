@@ -1,0 +1,131 @@
+[
+  {
+    "id": "dejavu-sans-mono",
+    "name": "DejaVu Sans Mono",
+    "files": [
+      {
+        "file": "dejavu-sans-mono-normal-400-e906dbf868f8e34f.woff2",
+        "style": "normal",
+        "weight": "400",
+        "bytes": 145344,
+        "sha256": "e906dbf868f8e34fa42c4263bcd6a46014f93c50212529791e4076bcde6547c7",
+        "source": "https://github.com/dejavu-fonts/dejavu-fonts/releases/download/version_2_37/dejavu-fonts-ttf-2.37.tar.bz2#dejavu-fonts-ttf-2.37/ttf/DejaVuSansMono.ttf",
+        "sourceSha256": "b4a6c3e4faab8773f4ff761d56451646409f29abedd68f05d38c2df667d3c582"
+      },
+      {
+        "file": "dejavu-sans-mono-normal-700-47e2841f5399a134.woff2",
+        "style": "normal",
+        "weight": "700",
+        "bytes": 143924,
+        "sha256": "47e2841f5399a1345abb86b789e49fff466c454ba236108d7ed129ed0450e0c1",
+        "source": "https://github.com/dejavu-fonts/dejavu-fonts/releases/download/version_2_37/dejavu-fonts-ttf-2.37.tar.bz2#dejavu-fonts-ttf-2.37/ttf/DejaVuSansMono-Bold.ttf",
+        "sourceSha256": "bce60f1b4421acd9ea51ba6623d7024ecbe6817a953e3654df62a5e6bdf8f769"
+      },
+      {
+        "file": "dejavu-sans-mono-italic-400-49fc2ac67e439c32.woff2",
+        "style": "italic",
+        "weight": "400",
+        "bytes": 107608,
+        "sha256": "49fc2ac67e439c3206cfa9d7dcfdf2c3321c8100f021dac443dcbbf8694da9b3",
+        "source": "https://github.com/dejavu-fonts/dejavu-fonts/releases/download/version_2_37/dejavu-fonts-ttf-2.37.tar.bz2#dejavu-fonts-ttf-2.37/ttf/DejaVuSansMono-Oblique.ttf",
+        "sourceSha256": "742097840c541870e8d6dc5c9b37bb1ceeea6c0dedd1d475faf903ef9df734b0"
+      },
+      {
+        "file": "dejavu-sans-mono-italic-700-9aaa17d9941b56dc.woff2",
+        "style": "italic",
+        "weight": "700",
+        "bytes": 108460,
+        "sha256": "9aaa17d9941b56dc60afa02d0acefe2853af85041829bcb3bb73046043382b4d",
+        "source": "https://github.com/dejavu-fonts/dejavu-fonts/releases/download/version_2_37/dejavu-fonts-ttf-2.37.tar.bz2#dejavu-fonts-ttf-2.37/ttf/DejaVuSansMono-BoldOblique.ttf",
+        "sourceSha256": "91713a71d550bba22c2a6b2bb2a9ad8f9a159e12e4e9f0a5b2677998ba21213e"
+      }
+    ]
+  },
+  {
+    "id": "source-code-pro",
+    "name": "Source Code Pro",
+    "files": [
+      {
+        "file": "source-code-pro-normal-200_900-d5354036d08c4a7c.woff2",
+        "style": "normal",
+        "weight": "200 900",
+        "bytes": 89484,
+        "sha256": "d5354036d08c4a7cea27a1e02bd3c1bc2fbfdd8c85818a35ee890068eb4a4217",
+        "source": "https://raw.githubusercontent.com/google/fonts/5bb28733cec313b63fbd415b574b5ae35c8aa8b8/ofl/sourcecodepro/SourceCodePro%5Bwght%5D.ttf",
+        "sourceSha256": "b400fc584e10aff25d0e775ce181b4fc1c5ea1b5dc37b81aeb2084375b945790"
+      },
+      {
+        "file": "source-code-pro-italic-200_900-7ccf5c77b3781dde.woff2",
+        "style": "italic",
+        "weight": "200 900",
+        "bytes": 75092,
+        "sha256": "7ccf5c77b3781dde07c83f6e706a7a1d805dbdbc672e7bf02e668705c0c32379",
+        "source": "https://raw.githubusercontent.com/google/fonts/5bb28733cec313b63fbd415b574b5ae35c8aa8b8/ofl/sourcecodepro/SourceCodePro-Italic%5Bwght%5D.ttf",
+        "sourceSha256": "6db77d25aa7b30eff449305b5c998e475694c74d398421127ea5a60f536413cd"
+      }
+    ]
+  },
+  {
+    "id": "jetbrains-mono",
+    "name": "JetBrains Mono",
+    "files": [
+      {
+        "file": "jetbrains-mono-normal-100_800-7b7f3419196f675a.woff2",
+        "style": "normal",
+        "weight": "100 800",
+        "bytes": 71736,
+        "sha256": "7b7f3419196f675a973d30cb70078749120caddea86c8547ebf54a8db2ca13af",
+        "source": "https://raw.githubusercontent.com/google/fonts/5bb28733cec313b63fbd415b574b5ae35c8aa8b8/ofl/jetbrainsmono/JetBrainsMono%5Bwght%5D.ttf",
+        "sourceSha256": "48715a42ec242c21e9f02692891e147d022299a52e48d5e413e1a942193ffeda"
+      },
+      {
+        "file": "jetbrains-mono-italic-100_800-84ef9a6d8b91d130.woff2",
+        "style": "italic",
+        "weight": "100 800",
+        "bytes": 76452,
+        "sha256": "84ef9a6d8b91d130a05c2b5697756d7b8d0d72ce5aef9ddffdd66881fac8e9f1",
+        "source": "https://raw.githubusercontent.com/google/fonts/5bb28733cec313b63fbd415b574b5ae35c8aa8b8/ofl/jetbrainsmono/JetBrainsMono-Italic%5Bwght%5D.ttf",
+        "sourceSha256": "85ae2a5cd3f56baf1ce1c21a851322c58e3d8fbe8e8ad4a4d090a820dd7fe558"
+      }
+    ]
+  },
+  {
+    "id": "fira-code",
+    "name": "Fira Code",
+    "files": [
+      {
+        "file": "fira-code-normal-300_700-9a0a9fc5a9963d90.woff2",
+        "style": "normal",
+        "weight": "300 700",
+        "bytes": 106220,
+        "sha256": "9a0a9fc5a9963d90870252eccbe43aa8df6909d038d4ba0b2a8752d40664e66b",
+        "source": "https://raw.githubusercontent.com/google/fonts/5bb28733cec313b63fbd415b574b5ae35c8aa8b8/ofl/firacode/FiraCode%5Bwght%5D.ttf",
+        "sourceSha256": "9335b082b3c7850d98a64b584f3417f65355f3471278bb5eeb8c6c0e8657aeeb"
+      }
+    ]
+  },
+  {
+    "id": "cascadia-code",
+    "name": "Cascadia Code",
+    "files": [
+      {
+        "file": "cascadia-code-normal-200_700-29b533b0c7f58882.woff2",
+        "style": "normal",
+        "weight": "200 700",
+        "bytes": 218444,
+        "sha256": "29b533b0c7f588826ce5bedfb679761d0597e909e91b11bbabefbe65473e3018",
+        "source": "https://raw.githubusercontent.com/google/fonts/5bb28733cec313b63fbd415b574b5ae35c8aa8b8/ofl/cascadiacode/CascadiaCode%5Bwght%5D.ttf",
+        "sourceSha256": "30f2e14a5c389b346b1fce110c4ddcf0dc5ce8265faf5eca2ab7323f49dba590"
+      },
+      {
+        "file": "cascadia-code-italic-200_700-bbf27307003b8e54.woff2",
+        "style": "italic",
+        "weight": "200 700",
+        "bytes": 159856,
+        "sha256": "bbf27307003b8e542efc5b78cadac66a693e7b64793c9eec463c4fef5f58a49f",
+        "source": "https://raw.githubusercontent.com/google/fonts/5bb28733cec313b63fbd415b574b5ae35c8aa8b8/ofl/cascadiacode/CascadiaCode-Italic%5Bwght%5D.ttf",
+        "sourceSha256": "33559b4beb60523b824e25a416b5de2779a9bc7c7ce32ce128490b42acbf4681"
+      }
+    ]
+  }
+]

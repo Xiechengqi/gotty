@@ -1,6 +1,6 @@
 {
   "name": "@gotty/terminal-core",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "private": false,
   "type": "module",
   "main": "webtty.ts",
@@ -12,7 +12,13 @@
     "appearance.ts",
     "key-encoder.ts",
     "keyboard-viewport.ts",
-    "mobile-key-layout.ts"
+    "mobile-key-layout.ts",
+    "fonts.ts",
+    "themes.ts",
+    "font-files.ts",
+    "font-manifest.json",
+    "fonts",
+    "font-licenses"
   ],
   "exports": {
     ".": "./webtty.ts",
@@ -20,7 +26,8 @@
     "./appearance": "./appearance.ts",
     "./key-encoder": "./key-encoder.ts",
     "./keyboard-viewport": "./keyboard-viewport.ts",
-    "./mobile-key-layout": "./mobile-key-layout.ts"
+    "./mobile-key-layout": "./mobile-key-layout.ts",
+    "./fonts": "./fonts.ts"
   },
   "license": "MIT"
 }

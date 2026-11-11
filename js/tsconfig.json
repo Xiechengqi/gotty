@@ -1,24 +1,32 @@
 {
   "compilerOptions": {
-      "outDir": "./dist/",
-      "rootDir": ".",
-      "jsx": "react-jsx",
-      "jsxImportSource": "preact",
-      "strictNullChecks": true,
-      "noUnusedLocals" : true,
-      "noImplicitThis": true,
-      "alwaysStrict": true,
-      "declaration": true,
-      "sourceMap": true,
-      "target": "esnext",
-      "module": "commonJS",
-      "ignoreDeprecations": "6.0",
-      "types": ["preact", "node"],
-      "paths": {
-          "*": ["./typings/*"]
-      }
+    "outDir": "./dist/",
+    "rootDir": ".",
+    "jsx": "react-jsx",
+    "jsxImportSource": "preact",
+    "strictNullChecks": true,
+    "noUnusedLocals": true,
+    "noImplicitThis": true,
+    "alwaysStrict": true,
+    "declaration": true,
+    "sourceMap": true,
+    "target": "esnext",
+    "module": "ESNext",
+    "ignoreDeprecations": "6.0",
+    "types": [
+      "preact",
+      "node"
+    ],
+    "paths": {
+      "*": [
+        "./typings/*"
+      ]
+    },
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "allowSyntheticDefaultImports": true
   },
-    "exclude": [
+  "exclude": [
     "node_modules",
     "dist",
     "e2e",

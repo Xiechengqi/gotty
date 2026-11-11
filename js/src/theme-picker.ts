@@ -4,7 +4,9 @@
 
 import { Terminal } from "@xterm/xterm";
 
-import { DEFAULT_THEME, DEFAULT_FONT_FAMILY, FONT_SIZES, FONT_FAMILIES, themeLabel, isFontAvailable, xtermTheme, type ThemeMap } from "../packages/terminal-core/appearance";
+import { DEFAULT_THEME, DEFAULT_FONT_FAMILY, FONT_SIZES, FONT_FAMILIES, themeLabel, xtermTheme, type ThemeMap } from "../packages/terminal-core/appearance";
+
+import {applyLoadedFont, ensureFont, fontIdForFamily, fontState, inspectFontCache, subscribeFonts} from "../packages/terminal-core/fonts";
 
 const STORAGE_THEME = "gotty-theme";
 const STORAGE_FONT_SIZE = "gotty-font-size";
@@ -70,6 +72,22 @@ export function initThemePicker(term?: Terminal, options: ThemePickerOptions = {
         applyTheme(term, themes[activeThemeName]);
     }
     if (applyFontPrefs(term)) refitSoon(options.refit);
+    let fontSelection = 0;
+    const restoredFamily = activeFontFamily;
+    const restoredFont = fontIdForFamily(restoredFamily);
+    if (restoredFont) void ensureFont(restoredFont).then(() => {
+        if (fontSelection === 0 && term?.options.fontFamily === restoredFamily) {
+            applyLoadedFont(term.options, restoredFamily); refitSoon(options.refit);
+        }
+    }).catch(() => {
+        if (fontSelection === 0 && term && term.options.fontFamily === restoredFamily) {
+            void ensureFont("source-code-pro").then(() => {
+                if (fontSelection === 0 && term.options.fontFamily === restoredFamily) {
+                    applyLoadedFont(term.options, DEFAULT_FONT_FAMILY); refitSoon(options.refit);
+                }
+            }).catch(() => {});
+        }
+    });
 
     if (options.controls === false) {
         return;
@@ -380,55 +398,56 @@ export function initThemePicker(term?: Terminal, options: ThemePickerOptions = {
 
     const currentFF = activeFontFamily || term?.options?.fontFamily || "";
 
+    const fontRows: {id: string; item: HTMLElement; tag: HTMLElement}[] = [];
+    const stateLabels = {downloadable: "download", loading: "loading…", cached: "cached", ready: "loaded", system: "", unavailable: "unavailable on this device", error: "retry download"};
+    const updateFonts = () => {
+        for (const row of fontRows) {
+            const state = fontState(row.id);
+            row.item.classList.toggle("unavailable", state === "unavailable");
+            row.item.setAttribute("aria-disabled", String(state === "unavailable" || state === "loading"));
+            row.tag.textContent = stateLabels[state];
+        }
+    };
     for (const ff of FONT_FAMILIES) {
-        // The picker cannot load fonts, so it can only use what is already
-        // installed. A name that is missing silently falls back to monospace
-        // and looks like the click did nothing, so mark those as unavailable
-        // and leave them unselectable.
-        const available = isFontAvailable(ff.name);
         const item = document.createElement("div");
         item.className = "font-family-item";
-        if (ff.value === currentFF) {
-            item.classList.add("active");
-        }
-        if (!available) {
-            item.classList.add("unavailable");
-        }
-
+        item.setAttribute("role", "button");
+        item.tabIndex = 0;
+        if (ff.value === currentFF) item.classList.add("active");
         const preview = document.createElement("span");
         preview.className = "font-family-preview";
         preview.textContent = ff.name;
         preview.style.fontFamily = ff.value;
         item.appendChild(preview);
-
-        if (!available) {
-            const tag = document.createElement("span");
-            tag.className = "font-family-tag";
-            tag.textContent = "not installed";
-            item.appendChild(tag);
-        }
-
+        const tag = document.createElement("span");
+        tag.className = "font-family-tag";
+        item.appendChild(tag);
+        fontRows.push({id: ff.id, item, tag});
         const check = document.createElement("span");
         check.className = "font-family-check";
         check.textContent = "✓";
         item.appendChild(check);
-
-        if (available) {
-            item.addEventListener("click", () => {
-                if (term) {
-                    term.options.fontFamily = ff.value;
-                }
+        const select = async () => {
+            if (["unavailable", "loading"].includes(fontState(ff.id))) return;
+            const revision = ++fontSelection;
+            try {
+                await ensureFont(ff.id);
+                if (revision !== fontSelection) return;
+                activeFontFamily = ff.value;
+                if (term) applyLoadedFont(term.options, ff.value);
                 localStorage.setItem(STORAGE_FONT_FAMILY, ff.value);
-                panel.querySelectorAll(".font-family-item").forEach((el) => {
-                    el.classList.remove("active");
-                });
+                panel.querySelectorAll(".font-family-item").forEach(el => el.classList.remove("active"));
                 item.classList.add("active");
                 refitSoon(options.refit);
-            });
-        }
-
+            } catch {updateFonts();}
+        };
+        item.addEventListener("click", () => {void select();});
+        item.addEventListener("keydown", event => {if (event.key === "Enter" || event.key === " ") {event.preventDefault(); void select();}});
         panel.appendChild(item);
     }
+    updateFonts();
+    const unsubscribeFonts = subscribeFonts(() => {if (container.isConnected) updateFonts(); else unsubscribeFonts();});
+    void inspectFontCache();
 
     container.appendChild(panel);
     document.body.appendChild(container);

@@ -2,6 +2,8 @@ OUTPUT_DIR = ./builds
 GIT_COMMIT = `git rev-parse HEAD | cut -c1-7`
 VERSION = $(shell git describe --tags --always)
 BUILD_OPTIONS = -ldflags "-X main.Version=$(VERSION)"
+TERMINAL_FONT_SOURCES = $(wildcard js/packages/terminal-core/fonts/* js/packages/terminal-core/font-licenses/*)
+TERMINAL_FONT_ASSETS = $(patsubst js/packages/terminal-core/%,bindata/static/js/%,$(TERMINAL_FONT_SOURCES)) bindata/static/js/font-licenses/manifest.json
 
 ifeq ($(DEV), 1)
 	BUILD_OPTIONS += -tags dev
@@ -19,7 +21,7 @@ docker:
 	docker build --build-arg VERSION=$(VERSION) . -t gotty-bash:$(VERSION)
 
 .PHONY: all docker assets
-assets: bindata/static/js/gotty.js.map \
+assets: $(TERMINAL_FONT_ASSETS) bindata/static/js/gotty.js.map \
 	bindata/static/js/gotty.js \
 	bindata/static/js/gotty.licenses.txt \
 	bindata/static/js/gotty.js.LICENSE.txt \
@@ -50,7 +52,10 @@ js/node_modules/@xterm/xterm/css/xterm.css:
 	cd js && \
 	npm ci
 
-bindata/static/js/gotty.js.map bindata/static/js/gotty.js bindata/static/js/gotty.licenses.txt bindata/static/js/gotty.js.LICENSE.txt &: $(wildcard js/src/*.ts js/src/*.tsx js/src/*.scss js/packages/terminal-core/*.ts) js/webpack.config.js js/tsconfig.json js/package-lock.json | js/node_modules/webpack
+js/packages/terminal-core/themes.ts: server/terminaldata/themes.json scripts/sync-terminal-themes.py
+	python3 scripts/sync-terminal-themes.py
+
+$(TERMINAL_FONT_ASSETS) bindata/static/js/gotty.js.map bindata/static/js/gotty.js bindata/static/js/gotty.licenses.txt bindata/static/js/gotty.js.LICENSE.txt &: js/packages/terminal-core/themes.ts $(TERMINAL_FONT_SOURCES) $(wildcard js/src/*.ts js/src/*.tsx js/src/*.scss js/packages/terminal-core/*.ts js/packages/terminal-core/*.json) js/webpack.config.js js/tsconfig.json js/package-lock.json | js/node_modules/webpack
 	cd js && \
 	npx webpack --mode=$(WEBPACK_MODE)
 

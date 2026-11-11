@@ -49,7 +49,7 @@ The project implements an HTTP / WebSocket web terminal and sharing flow. It doe
 - Read-only by default. Browser input is allowed only when `--permit-write` / `-w` is enabled.
 - Multiple browser clients share the same terminal session, with a connection counter and optional connection limit.
 - xterm.js frontend with WebGL rendering, link detection, Unicode support, responsive sizing, and mobile recovery behavior.
-- Built-in display panel: Nord theme and Source Code Pro by default, with runtime theme, font size, and font family switching persisted to localStorage.
+- Built-in display panel: Nord and bundled Source Code Pro by default, with runtime theme, text size, and font choices persisted to localStorage. Additional open-source fonts load from this server on demand and remain cached across reloads.
 - Automatically copies selected terminal text to the clipboard and shows a browser notification after success.
 - File upload button and zmodem transfer channel.
 - Automatic reconnect and offset-based terminal output replay after refresh or disconnect.
@@ -333,7 +333,7 @@ mobile_keys = true
 confirm_close = true
 ```
 
-Both settings default to true. Disable them with `--mobile-keys=false` or `--confirm-close=false`. Close confirmation is armed while the WebSocket is connected; the browser controls the dialog and usually requires prior user interaction. An intentional reload after restarting the server bypasses the guard. Font changes and restored display preferences refit the terminal; unavailable fonts are marked and cannot be selected.
+Both settings default to true. Disable them with `--mobile-keys=false` or `--confirm-close=false`. Close confirmation is armed while the WebSocket is connected; the browser controls the dialog and usually requires prior user interaction. An intentional reload after restarting the server bypasses the guard. Font changes and restored display preferences refit the terminal. Source Code Pro, JetBrains Mono, Fira Code, DejaVu Sans Mono, and Cascadia Code ship with the program, load from the same server on demand, and persist as font bytes in IndexedDB for reuse after reload. Downloads can be retried; loading still works without persistent browser storage. Monaco and Menlo require an existing system installation; `monospace` is always available. Caches belong to each browser and origin; clearing site data or browser eviction requires downloading fonts again.
 
 ## Reverse proxies
 
