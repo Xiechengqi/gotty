@@ -363,6 +363,7 @@ export class GoTTYXterm {
         this.term = new Terminal({
             allowProposedApi: true,
             ...defaultDisplayOptions(),
+            fontFamily: 'monospace', // The picker applies the bundled font once loaded.
         });
 
         const unicode11Addon = new Unicode11Addon();
@@ -551,9 +552,13 @@ export class GoTTYXterm {
         this.term.textarea?.setAttribute("autocomplete", "off");
 
         try {
-            this.term.loadAddon(new WebglAddon());
+            const webgl = new WebglAddon();
+            webgl.onContextLoss(() => {webgl.dispose(); elem.dataset.terminalRenderer = 'dom';});
+            this.term.loadAddon(webgl);
+            elem.dataset.terminalRenderer = 'webgl';
         } catch (e) {
-            console.warn("WebGL renderer failed to load, using canvas fallback", e);
+            elem.dataset.terminalRenderer = 'dom';
+            console.warn("WebGL renderer failed to load, using DOM fallback", e);
         }
 
         this.fitTerminal();

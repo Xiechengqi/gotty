@@ -4,9 +4,10 @@
 
 import { Terminal } from "@xterm/xterm";
 
-import { DEFAULT_THEME, DEFAULT_FONT_FAMILY, FONT_SIZES, FONT_FAMILIES, themeLabel, xtermTheme, type ThemeMap } from "../packages/terminal-core/appearance";
+import { DEFAULT_THEME, DEFAULT_FONT_FAMILY, DEFAULT_FONT_SIZE, FONT_SIZES, FONT_FAMILIES, themeLabel, xtermTheme, type ThemeMap } from "../packages/terminal-core/appearance";
 
-import {applyLoadedFont, ensureFont, fontIdForFamily, fontState, inspectFontCache, subscribeFonts} from "../packages/terminal-core/fonts";
+import {fontState, inspectFontCache, subscribeFonts} from "../packages/terminal-core/fonts";
+import {applyTerminalFont, fontDiagnostics, type FontApplication} from "../packages/terminal-core/font-rendering";
 
 const STORAGE_THEME = "gotty-theme";
 const STORAGE_FONT_SIZE = "gotty-font-size";
@@ -46,11 +47,6 @@ function applyFontPrefs(term: Terminal | undefined): boolean {
             term.options.fontSize = n;
         }
     }
-    const ff = localStorage.getItem(STORAGE_FONT_FAMILY) || DEFAULT_FONT_FAMILY;
-    if (ff) {
-        applied = applied || term.options.fontFamily !== ff;
-        term.options.fontFamily = ff;
-    }
     return applied;
 }
 
@@ -76,21 +72,20 @@ export function initThemePicker(term?: Terminal, options: ThemePickerOptions = {
     }
     if (applyFontPrefs(term)) refitSoon(options.refit);
     let fontSelection = 0;
-    const restoredFamily = activeFontFamily;
-    const restoredFont = fontIdForFamily(restoredFamily);
-    if (restoredFont) void ensureFont(restoredFont).then(() => {
-        if (fontSelection === 0 && term?.options.fontFamily === restoredFamily) {
-            applyLoadedFont(term.options, restoredFamily); refitSoon(options.refit);
-        }
-    }).catch(() => {
-        if (fontSelection === 0 && term && term.options.fontFamily === restoredFamily) {
-            void ensureFont("source-code-pro").then(() => {
-                if (fontSelection === 0 && term.options.fontFamily === restoredFamily) {
-                    applyLoadedFont(term.options, DEFAULT_FONT_FAMILY); refitSoon(options.refit);
-                }
-            }).catch(() => {});
-        }
-    });
+    let statusElement: HTMLElement | undefined;
+    let fontStatus: FontApplication | undefined;
+    const updateStatus = (state: FontApplication) => {
+        fontStatus = state;
+        fontDiagnostics(term?.element, state);
+        if (statusElement) statusElement.textContent = state.status === 'loading' ? 'Loading font…'
+            : state.status === 'fallback' ? `Font unavailable. Using ${state.appliedFamily}. Select a font to retry.`
+            : `Current font: ${state.appliedFamily}`;
+    };
+    const loadFont = (family: string, revision: number) => term ? applyTerminalFont({options: term.options, family,
+        isCurrent: () => revision === fontSelection && (!term.element || term.element.isConnected),
+        onChange: updateStatus, onApplied: () => refitSoon(options.refit)}) : Promise.resolve(undefined);
+    if (term) term.options.fontFamily = 'monospace';
+    void loadFont(activeFontFamily, fontSelection);
 
     if (options.controls === false) {
         return;
@@ -282,6 +277,12 @@ export function initThemePicker(term?: Terminal, options: ThemePickerOptions = {
     color: rgba(255,255,255,0.35);
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 }
+#gotty-theme-picker .font-status {
+    max-width: 260px;
+    padding: 8px 10px;
+    color: #ccc;
+    font: 12px/1.5 sans-serif;
+}
 `;
 
     document.head.appendChild(style);
@@ -370,7 +371,7 @@ export function initThemePicker(term?: Terminal, options: ThemePickerOptions = {
     sizeRow.className = "font-size-row";
 
     const savedSize = activeFontSize ? parseInt(activeFontSize, 10) : null;
-    const currentSize = (savedSize && !isNaN(savedSize)) ? savedSize : (term?.options?.fontSize || 14);
+    const currentSize = (savedSize && !isNaN(savedSize)) ? savedSize : (term?.options?.fontSize || DEFAULT_FONT_SIZE);
 
     for (const sz of FONT_SIZES) {
         const sb = document.createElement("button");
@@ -434,10 +435,9 @@ export function initThemePicker(term?: Terminal, options: ThemePickerOptions = {
             if (["unavailable", "loading"].includes(fontState(ff.id))) return;
             const revision = ++fontSelection;
             try {
-                await ensureFont(ff.id);
-                if (revision !== fontSelection) return;
+                const applied = await loadFont(ff.value, revision);
+                if (revision !== fontSelection || applied?.status !== 'ready') return;
                 activeFontFamily = ff.value;
-                if (term) applyLoadedFont(term.options, ff.value);
                 localStorage.setItem(STORAGE_FONT_FAMILY, ff.value);
                 panel.querySelectorAll(".font-family-item").forEach(el => el.classList.remove("active"));
                 item.classList.add("active");
@@ -449,6 +449,11 @@ export function initThemePicker(term?: Terminal, options: ThemePickerOptions = {
         panel.appendChild(item);
     }
     updateFonts();
+    statusElement = document.createElement('div');
+    statusElement.className = 'font-status';
+    statusElement.setAttribute('role', 'status');
+    panel.appendChild(statusElement);
+    if (fontStatus) updateStatus(fontStatus);
     const unsubscribeFonts = subscribeFonts(() => {if (container.isConnected) updateFonts(); else unsubscribeFonts();});
     void inspectFontCache();
 

@@ -24,7 +24,7 @@ function mockCanvas(available: string[]) {
 }
 
 function makeTerm() {
-  return { options: { fontSize: 14, fontFamily: "'Source Code Pro', monospace" } } as any;
+  return { options: { fontSize: 14, fontFamily: "monospace" } } as any;
 }
 
 // The refit is scheduled across animation frames; wait long enough for two
@@ -62,7 +62,7 @@ describe("font family availability", () => {
 
     fireEvent.click(missing);
 
-    expect(term.options.fontFamily).toBe("'Source Code Pro', monospace");
+    expect(term.options.fontFamily).toBe("monospace");
     expect(localStorage.getItem("gotty-font-family")).toBeNull();
   });
 
@@ -130,6 +130,15 @@ describe("re-fit after a font change", () => {
 
     await flushFrames();
     expect(refit).toHaveBeenCalled();
+  });
+
+  it("preserves an explicit Source Code Pro preference after upgrading the default", async () => {
+    localStorage.setItem("gotty-font-family", "'Source Code Pro', monospace");
+    const term = makeTerm();
+    initThemePicker(term);
+    await flushFrames();
+    expect(term.options.fontFamily).toBe("'Source Code Pro', monospace");
+    expect(localStorage.getItem("gotty-font-family")).toBe("'Source Code Pro', monospace");
   });
 });
 

@@ -3,13 +3,15 @@ export {BUILTIN_THEMES} from "./themes";
 // Display defaults and preference translation shared by GoTTY and GoTTY Hub.
 // The complete theme catalogue is supplied by GoTTY, alongside its preferences.
 export const DEFAULT_THEME = "nord";
-export const DEFAULT_FONT_FAMILY = "'Source Code Pro', monospace";
+export const DEFAULT_FONT_ID = "dejavu-sans-mono";
+export const DEFAULT_FONT_SIZE = 14;
+export const DEFAULT_FONT_FAMILY = "'DejaVu Sans Mono', monospace";
 export const FONT_SIZES = [10, 12, 14, 16, 18, 20, 24];
 export const FONT_FAMILIES = [
-    { id: "dejavu-sans-mono", name: "DejaVu Sans Mono", value: "'DejaVu Sans Mono', monospace" },
+    { id: "dejavu-sans-mono", name: "DejaVu Sans Mono", value: DEFAULT_FONT_FAMILY },
     { id: "jetbrains-mono", name: "JetBrains Mono", value: "'JetBrains Mono', monospace" },
     { id: "fira-code", name: "Fira Code", value: "'Fira Code', monospace" },
-    { id: "source-code-pro", name: "Source Code Pro", value: DEFAULT_FONT_FAMILY },
+    { id: "source-code-pro", name: "Source Code Pro", value: "'Source Code Pro', monospace" },
     { id: "monaco", name: "Monaco", value: "Monaco, monospace" },
     { id: "menlo", name: "Menlo", value: "Menlo, monospace" },
     { id: "cascadia-code", name: "Cascadia Code", value: "'Cascadia Code', monospace" },
@@ -21,6 +23,10 @@ export type Appearance = { theme?: string; fontSize?: number; fontFamily?: strin
 export interface DisplayOptions {
     fontSize: number;
     fontFamily: string;
+    fontWeight: 400;
+    fontWeightBold: 700;
+    lineHeight: number;
+    letterSpacing: number;
     scrollback: number;
     cursorBlink: boolean;
     cursorStyle?: "block" | "underline" | "bar";
@@ -33,7 +39,8 @@ export interface DisplayOptions {
 export const NORD_THEME = xtermTheme(BUILTIN_THEMES.nord);
 
 export function defaultDisplayOptions(): DisplayOptions {
-    return { fontSize: 14, fontFamily: DEFAULT_FONT_FAMILY, scrollback: 500, cursorBlink: false,
+    return { fontSize: DEFAULT_FONT_SIZE, fontFamily: DEFAULT_FONT_FAMILY,
+        fontWeight: 400, fontWeightBold: 700, lineHeight: 1, letterSpacing: 0, scrollback: 500, cursorBlink: false,
         customGlyphs: true, rescaleOverlappingGlyphs: true, theme: { ...NORD_THEME } };
 }
 
