@@ -16,6 +16,8 @@ type clientResizeRequest struct {
 	PixelRatio     float64 `json:"pixelRatio"`
 	ViewportWidth  int     `json:"viewportWidth"`
 	ViewportHeight int     `json:"viewportHeight"`
+	Visible        *bool   `json:"visible,omitempty"`
+	TakeControl    bool    `json:"takeControl,omitempty"`
 }
 
 func (server *Server) sendInitMessages(conn *websocket.Conn, client *Client) error {
@@ -82,6 +84,10 @@ func (server *Server) handleClientInput(client *Client, message []byte) {
 			decoded := make([]byte, base64.StdEncoding.DecodedLen(len(message)-1))
 			n, err := base64.StdEncoding.Decode(decoded, message[1:])
 			if err == nil && n > 0 {
+				if server.sessionManager.handleTerminalResponse(client, decoded[:n]) {
+					return
+				}
+				server.sessionManager.NoteClientActivity(client)
 				if server.terminalStatus != nil {
 					// Atomically check state and update activity; write runs outside lock
 					server.terminalStatus.WriteUserInput(func() {

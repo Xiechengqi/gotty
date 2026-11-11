@@ -1,7 +1,7 @@
 import {expect,it} from 'vitest';
 import {BUILTIN_THEMES,defaultDisplayOptions,displayOptions,NORD_THEME,terminalPreferences} from '../../packages/terminal-core/appearance';
 it('uses the same Nord palette and explicit DejaVu rendering baseline in both clients',()=>{
- const options=defaultDisplayOptions();expect(options).toMatchObject({fontSize:14,fontFamily:"'DejaVu Sans Mono', monospace",fontWeight:400,fontWeightBold:700,lineHeight:1,letterSpacing:0});expect(options.theme).toEqual(NORD_THEME);expect(options.scrollback).toBe(500);
+ const options=defaultDisplayOptions();expect(options).toMatchObject({fontSize:14,fontFamily:"'DejaVu Sans Mono', monospace",fontWeight:400,fontWeightBold:700,lineHeight:1,letterSpacing:0});expect(options.theme).toEqual(NORD_THEME);expect(options.scrollback).toBe(5000);
 });
 it('keeps remote font size, scrollback and cursor settings while applying picker choices',()=>{
  const prefs={'font-size':20,'scrollback-lines':900,'cursor-blink':true,'cursor-style':'bar'};

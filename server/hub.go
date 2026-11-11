@@ -360,7 +360,7 @@ func (h *hubManager) connect(b hubBinding) error {
 			return true
 		case <-ctx.Done():
 			return false
-		default:
+		case <-time.After(10 * time.Second):
 			cancel()
 			return false
 		}
@@ -544,16 +544,19 @@ func (h *hubManager) connect(b hubBinding) error {
 				return errors.New("stream limit")
 			}
 			var v struct {
-				Role     string `json:"role"`
-				Channel  string `json:"channel"`
-				Writable bool   `json:"writable"`
-				Epoch    string `json:"epoch"`
-				Offset   int64  `json:"offset"`
+				Role          string `json:"role"`
+				Channel       string `json:"channel"`
+				Writable      bool   `json:"writable"`
+				Epoch         string `json:"epoch"`
+				Offset        int64  `json:"offset"`
+				ClientKey     string `json:"client_key"`
+				ReplayVersion int    `json:"replay_version"`
+				Sequence      int64  `json:"sequence"`
 			}
 			if json.Unmarshal(f.Data, &v) != nil {
 				return errors.New("bad open")
 			}
-			client := &Client{send: make(chan []byte, 256), ready: make(chan struct{}), readOnly: v.Role == "observer" || !v.Writable, init: InitMessage{Epoch: v.Epoch, LastOffset: v.Offset}}
+			client := &Client{send: make(chan []byte, 256), ready: make(chan struct{}), readOnly: v.Role == "observer" || !v.Writable, init: InitMessage{Epoch: v.Epoch, LastOffset: v.Offset, ClientKey: v.ClientKey, ReplayVersion: v.ReplayVersion, LastSequence: v.Sequence}}
 			select {
 			case h.server.sessionManager.register <- client:
 			case <-ctx.Done():
@@ -665,9 +668,13 @@ func (h *hubManager) forward(ctx context.Context, id string, c *Client, send fun
 		return
 	}
 	r := c.replay
-	marshal('a', replayBeginPayload{Epoch: r.Epoch, Mode: r.Mode, FromOffset: r.FromOffset})
-	if r.Mode != "resume" {
-		emit(encodeOutputMessage([]byte("\x1bc")))
+	if !marshal('a', replayBeginPayload{Epoch: r.Epoch, Mode: r.Mode, FromOffset: r.FromOffset, Columns: r.Columns, Rows: r.Rows, Sequence: r.Sequence, Truncated: r.Truncated, FromSequence: r.FromSequence}) {
+		return
+	}
+	if r.Mode == "tail" {
+		if !emit(encodeOutputMessage([]byte("\x1bc"))) {
+			return
+		}
 	}
 	for start := 0; start < len(r.Data); start += replayChunkSize {
 		end := start + replayChunkSize
@@ -678,7 +685,14 @@ func (h *hubManager) forward(ctx context.Context, id string, c *Client, send fun
 			return
 		}
 	}
-	marshal('b', replayEndPayload{EndOffset: r.EndOffset})
+	for _, event := range r.Events {
+		if !marshal('c', event) {
+			return
+		}
+	}
+	if !marshal('b', replayEndPayload{EndOffset: r.EndOffset, Sequence: r.Sequence}) {
+		return
+	}
 	for {
 		select {
 		case m, ok := <-c.send:

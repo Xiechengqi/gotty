@@ -40,9 +40,11 @@ type Options struct {
 	MinRows             int    `hcl:"min_rows" flagName:"min-rows" flagDescribe:"Minimum terminal rows when resizing dynamically" default:"20"`
 	MaxRows             int    `hcl:"max_rows" flagName:"max-rows" flagDescribe:"Maximum terminal rows when resizing dynamically" default:"80"`
 	ResizeDebounceMs    int    `hcl:"resize_debounce_ms" flagName:"resize-debounce-ms" flagDescribe:"Debounce window in milliseconds for terminal resize updates" default:"120"`
-	LeaderSelect        string `hcl:"leader_select" flagName:"leader-select" flagDescribe:"Leader selection mode for leader policy: latest or first" default:"latest"`
+	LeaderSelect        string `hcl:"leader_select" flagName:"leader-select" flagDescribe:"Fallback leader selection: first or latest (new connections never preempt an active leader)" default:"first"`
 	LeaderSwitch        string `hcl:"leader_switch" flagName:"leader-switch" flagDescribe:"Leader change mode for leader policy: never, on_disconnect, or on_idle" default:"on_disconnect"`
 	LeaderIdleMs        int    `hcl:"leader_idle_ms" flagName:"leader-idle-ms" flagDescribe:"Idle timeout in milliseconds before leader can be replaced in on_idle mode" default:"10000"`
+	LeaderGraceMs       int    `hcl:"leader_grace_ms" flagName:"leader-grace-ms" flagDescribe:"Keep terminal size ownership during a brief reconnect, in milliseconds" default:"5000"`
+	HistoryLines        int    `hcl:"history_lines" flagName:"history-lines" flagDescribe:"Maximum normal-screen history lines restored to a new browser" default:"5000"`
 	ShowTerminalState   bool   `hcl:"show_terminal_state" flagName:"show-terminal-state" flagDescribe:"Show terminal resize state overlay in the browser" default:"false"`
 	WSOrigin            string `hcl:"ws_origin" flagName:"ws-origin" flagDescribe:"A regular expression that matches origin URLs to be accepted by WebSocket. No cross origin requests are acceptable by default" default:""`
 	WSQueryArgs         string `hcl:"ws_query_args" flagName:"ws-query-args" flagDescribe:"Querystring arguments to append to the websocket instantiation" default:""`
@@ -141,6 +143,12 @@ func (options *Options) Validate() error {
 	}
 	if options.EnableASR && options.ASRHoldMs < 0 {
 		return errors.New("enable-asr is enabled, but asr-hold-ms must be >= 0")
+	}
+	if options.LeaderGraceMs < 0 || options.LeaderGraceMs > 60000 {
+		return errors.New("leader-grace-ms must be between 0 and 60000")
+	}
+	if options.HistoryLines < 0 || options.HistoryLines > 50000 {
+		return errors.New("history-lines must be between 0 and 50000")
 	}
 	if options.HistoryReplayBytes < 0 {
 		return errors.New("history-replay-bytes must be >= 0")

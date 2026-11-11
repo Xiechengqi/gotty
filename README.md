@@ -231,7 +231,10 @@ enable_basic_auth = true
 credential = "user:pass"
 enable_reconnect = true
 history_replay_bytes = 524288
+history_lines = 5000
 resize_policy = "leader"
+leader_select = "first"
+leader_grace_ms = 5000
 restart_mode = "exec"
 
 preferences {
@@ -244,6 +247,8 @@ preferences {
 }
 ```
 
+多客户端默认共用当前控制客户端的终端网格，新连接不抢占尺寸；刷新通过服务端状态快照恢复保留历史和 Vim 屏幕。策略、保留上限及兼容性见 [终端恢复说明](docs/terminal-recovery.md)。
+
 ## 关键配置
 
 | 领域 | 配置 |
@@ -251,8 +256,8 @@ preferences {
 | 监听入口 | `address`、`port`、`path`、`random-url`、`random-url-length` |
 | 写入和连接 | `permit-write`、`max-connection`、`once`、`timeout`、`permit-arguments`、`pass-headers` |
 | 安全 | `credential`、`tls`、`tls-crt`、`tls-key`、`tls-ca-crt`、`ws-origin` |
-| 重连和回放 | `reconnect`、`reconnect-time`、`history-replay-bytes`、`ping-interval` |
-| 终端尺寸 | `width`、`height`、`resize-policy`、`min-cols`、`max-cols`、`min-rows`、`max-rows`、`leader-select`、`leader-switch` |
+| 重连和回放 | `reconnect`、`reconnect-time`、`history-lines`、`history-replay-bytes`、`ping-interval` |
+| 终端尺寸 | `width`、`height`、`resize-policy`、`min-cols`、`max-cols`、`min-rows`、`max-rows`、`leader-select`、`leader-switch`、`leader-grace-ms` |
 | 显示偏好 | `preferences.theme`、`font_size`、`font_family`、`cursor_style`、`scrollback_lines`、`alt_is_meta` |
 | API | `enable-api`、`api-probe-timeout`、`api-user-idle-ms`、`api-exec-timeout` |
 | ASR | `enable-asr`、`asr-backend`、`asr-hold-ms`、`asr-hotkey` |

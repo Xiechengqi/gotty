@@ -26,6 +26,7 @@ body {
 
 #terminal {
   position: relative;
+  overflow: auto;
   padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 

@@ -8,7 +8,6 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -22,21 +21,30 @@ const (
 )
 
 type Client struct {
-	id       string
-	conn     *websocket.Conn
-	send     chan []byte
-	ready    chan struct{}
-	init     InitMessage
-	replay   replaySnapshot
-	readOnly bool
+	id              string
+	conn            *websocket.Conn
+	send            chan []byte
+	ready           chan struct{}
+	init            InitMessage
+	replay          replaySnapshot
+	readOnly        bool
+	key             string
+	lastActivity    time.Time
+	cursorQuerySeen [2]int64
 }
 
 type replaySnapshot struct {
-	Epoch      string
-	Mode       string
-	FromOffset int64
-	EndOffset  int64
-	Data       []byte
+	Epoch        string
+	Mode         string
+	FromOffset   int64
+	EndOffset    int64
+	Data         []byte
+	Columns      int
+	Rows         int
+	Sequence     int64
+	FromSequence int64
+	Events       []streamEvent
+	Truncated    bool
 }
 
 type resizeDimensions struct {
@@ -47,6 +55,7 @@ type resizeDimensions struct {
 	ViewportWidth  int
 	ViewportHeight int
 	UpdatedAt      time.Time
+	Visible        bool
 }
 
 type terminalState struct {
@@ -58,6 +67,7 @@ type terminalState struct {
 	SourceClient  string `json:"sourceClientId"`
 	Connected     int    `json:"connectedClients"`
 	ResizeEnabled bool   `json:"resizeEnabled"`
+	SizeControl   bool   `json:"sizeControl"`
 }
 
 type SessionManager struct {
@@ -76,6 +86,12 @@ type SessionManager struct {
 	leaderSelect       string
 	leaderSwitch       string
 	leaderIdle         time.Duration
+	leaderGrace        time.Duration
+	leaderKey          string
+	leaderExpires      time.Time
+	resizeDue          time.Time
+	resizeEvents       chan resizeEvent
+	stream             *terminalStream
 	minCols            int
 	maxCols            int
 	minRows            int
@@ -131,6 +147,9 @@ func NewSessionManager(ctx context.Context, slave Slave, options *Options) *Sess
 		leaderSelect:       options.LeaderSelect,
 		leaderSwitch:       options.LeaderSwitch,
 		leaderIdle:         time.Duration(options.LeaderIdleMs) * time.Millisecond,
+		leaderGrace:        time.Duration(options.LeaderGraceMs) * time.Millisecond,
+		resizeEvents:       make(chan resizeEvent),
+		stream:             newTerminalStream(defaultCols, defaultRows, options.HistoryLines),
 		minCols:            options.MinCols,
 		maxCols:            options.MaxCols,
 		minRows:            options.MinRows,
@@ -160,6 +179,9 @@ func (sm *SessionManager) ReplaceSlave(newSlave Slave) (oldSlave Slave, generati
 	}
 	if sm.lineHistory != nil {
 		sm.lineHistory.Clear()
+	}
+	if sm.stream != nil {
+		sm.stream.Reset(max(cols, 1), max(rows, 1))
 	}
 	sm.cleanupUploadLocked()
 
@@ -202,31 +224,34 @@ func (sm *SessionManager) cleanupUploadLocked() {
 
 func (sm *SessionManager) InitializeTerminal() error {
 	sm.mu.Lock()
-	cols := sm.configuredCols
-	rows := sm.configuredRows
-	reason := "initial-size"
+	cols, rows := sm.configuredCols, sm.configuredRows
+	if cols <= 0 {
+		cols = defaultCols
+	}
+	if rows <= 0 {
+		rows = defaultRows
+	}
+	cols, rows = clamp(cols, sm.minCols, sm.maxCols), clamp(rows, sm.minRows, sm.maxRows)
+	if err := sm.slave.ResizeTerminal(cols, rows); err != nil {
+		sm.mu.Unlock()
+		return err
+	}
+	sm.activeCols, sm.activeRows = cols, rows
 	sm.lastResizeSource = "server-init"
-	if cols > 0 && rows > 0 {
-		sm.activeCols = cols
-		sm.activeRows = rows
-	} else {
-		// Dynamic policies should not force a startup PTY size; wait for client-reported fit size.
-		sm.activeCols = 0
-		sm.activeRows = 0
-		reason = "await-first-client-resize"
+	if sm.stream != nil {
+		sm.stream.Resize(cols, rows)
 	}
 	sm.mu.Unlock()
-
-	if cols > 0 && rows > 0 {
-		if err := sm.slave.ResizeTerminal(cols, rows); err != nil {
-			return err
-		}
-	}
-	sm.broadcastTerminalState(reason)
+	sm.broadcastTerminalState("initial-size")
 	return nil
 }
 
 func (sm *SessionManager) Run() {
+	ticker := time.NewTicker(25 * time.Millisecond)
+	defer ticker.Stop()
+	if sm.stream != nil {
+		defer sm.stream.Close()
+	}
 	for {
 		select {
 		case <-sm.ctx.Done():
@@ -235,55 +260,46 @@ func (sm *SessionManager) Run() {
 			sm.mu.Lock()
 			sm.nextClientSeq++
 			client.id = fmt.Sprintf("c-%d", sm.nextClientSeq)
-			sm.clients[client] = true
-			sm.clientOrder[client.id] = sm.nextClientSeq
-			if sm.resizePolicy == "leader" {
-				if sm.leaderSelect == "latest" {
-					sm.leaderClientID = client.id
-				} else if sm.leaderClientID == "" {
-					sm.leaderClientID = client.id
+			if validClientKey(client.init.ClientKey) {
+				client.key = client.init.ClientKey
+			}
+			client.lastActivity = time.Now()
+			if sm.stream != nil {
+				for index, query := range sm.stream.cursorQueries {
+					client.cursorQuerySeen[index] = query.sequence
 				}
 			}
+			sm.clients[client] = true
+			sm.clientOrder[client.id] = sm.nextClientSeq
+			// A refresh can recover an unoccupied lease, but a duplicate tab
+			// cannot preempt a connection that still holds it.
+			if !client.readOnly && client.key != "" && client.key == sm.leaderKey && !sm.leaderConnectedLocked() {
+				sm.leaderClientID = client.id
+				sm.leaderExpires = time.Time{}
+			}
 			client.replay = sm.buildReplaySnapshot(client.init)
-			// Keep the channel reference immutable: the handler waits on it
-			// concurrently, and closing publishes the initialized replay state.
 			if client.ready != nil {
 				close(client.ready)
 			}
 			sm.mu.Unlock()
-
 			sm.sendConnectionCount()
 			sm.broadcastTerminalState("client-connect")
-			sm.reconcileResize("client-connect")
 		case client := <-sm.unregister:
-			removed := false
 			sm.mu.Lock()
-			if _, ok := sm.clients[client]; ok {
-				removed = true
-				delete(sm.clients, client)
-				delete(sm.clientOrder, client.id)
-				delete(sm.clientSizes, client.id)
-				if client.id == sm.leaderClientID {
-					switch sm.leaderSwitch {
-					case "never":
-						sm.leaderClientID = ""
-					case "on_idle":
-						sm.leaderClientID = sm.pickLeaderFallbackLocked()
-					default:
-						sm.leaderClientID = sm.pickLeaderFallbackLocked()
-					}
-				}
-				close(client.send)
-			}
+			removed := sm.removeClientLocked(client, time.Now())
 			sm.mu.Unlock()
-
 			if removed {
 				sm.sendConnectionCount()
 				sm.broadcastTerminalState("client-disconnect")
-				sm.reconcileResize("client-disconnect")
 			}
+		case event := <-sm.resizeEvents:
+			sm.handleResizeEvent(event.client, event.request, time.Now())
+		case now := <-ticker.C:
+			sm.flushResize(now)
 		case message := <-sm.broadcast:
-			if sm.isStaleBroadcast(message) {
+			sm.mu.Lock()
+			if message.hasGeneration && message.generation != sm.generation {
+				sm.mu.Unlock()
 				continue
 			}
 			if len(message.raw) > 0 && sm.history != nil {
@@ -292,20 +308,55 @@ func (sm *SessionManager) Run() {
 			if len(message.wire) == 0 && len(message.raw) > 0 {
 				message.wire = encodeOutputMessage(message.raw)
 			}
-			sm.mu.Lock()
-			for client := range sm.clients {
-				select {
-				case client.send <- message.wire:
-				default:
-					close(client.send)
-					delete(sm.clients, client)
-					delete(sm.clientOrder, client.id)
-					delete(sm.clientSizes, client.id)
-				}
-			}
+			sm.publishLocked(message.wire, message.raw)
 			sm.mu.Unlock()
 		}
 	}
+}
+
+// All persistent stream events are ordered under mu, including PTY resize.
+// Slow consumers use the same ownership cleanup as normal disconnects.
+func (sm *SessionManager) publishLocked(wire, raw []byte) {
+	var event []byte
+	if sm.stream != nil {
+		event = sm.stream.Append(wire, raw)
+	}
+	for client := range sm.clients {
+		frame := wire
+		if client.init.ReplayVersion >= 2 && len(event) > 0 {
+			frame = event
+		}
+		select {
+		case client.send <- frame:
+		default:
+			sm.removeClientLocked(client, time.Now())
+		}
+	}
+}
+
+func (sm *SessionManager) removeClientLocked(client *Client, now time.Time) bool {
+	if !sm.clients[client] {
+		return false
+	}
+	delete(sm.clients, client)
+	delete(sm.clientOrder, client.id)
+	delete(sm.clientSizes, client.id)
+	close(client.send)
+	if client.id == sm.leaderClientID {
+		if client.key != "" {
+			sm.leaderExpires = now.Add(sm.leaderGrace)
+		} else {
+			sm.leaderExpires = now
+		}
+		// Keep the last grid during refresh; never means hold until takeover.
+		if sm.leaderSwitch != "never" {
+			sm.resizeDue = sm.leaderExpires
+		}
+	}
+	if sm.resizePolicy == "median" {
+		sm.resizeDue = now.Add(sm.resizeDebounce)
+	}
+	return true
 }
 
 func (sm *SessionManager) isStaleBroadcast(message broadcastMessage) bool {
@@ -323,6 +374,9 @@ func (sm *SessionManager) buildReplaySnapshot(init InitMessage) replaySnapshot {
 	}
 
 	epoch, _, tail := sm.history.Offsets()
+	if init.ReplayVersion >= 2 && sm.stream != nil {
+		return sm.buildStreamReplay(init, epoch, tail)
+	}
 	if init.Epoch != "" && init.Epoch == epoch {
 		if data, ok := sm.history.GetSince(init.LastOffset); ok {
 			return replaySnapshot{
@@ -346,186 +400,6 @@ func (sm *SessionManager) buildReplaySnapshot(init InitMessage) replaySnapshot {
 	}
 }
 
-func (sm *SessionManager) HandleClientResize(client *Client, req clientResizeRequest) {
-	if client == nil || req.Columns <= 0 || req.Rows <= 0 {
-		return
-	}
-
-	now := time.Now()
-	sm.mu.Lock()
-	if _, ok := sm.clients[client]; !ok {
-		sm.mu.Unlock()
-		return
-	}
-
-	sm.clientSizes[client.id] = resizeDimensions{
-		Columns:        clamp(req.Columns, sm.minCols, sm.maxCols),
-		Rows:           clamp(req.Rows, sm.minRows, sm.maxRows),
-		DeviceClass:    req.DeviceClass,
-		PixelRatio:     req.PixelRatio,
-		ViewportWidth:  req.ViewportWidth,
-		ViewportHeight: req.ViewportHeight,
-		UpdatedAt:      now,
-	}
-
-	cols, rows, sourceClientID, shouldResize := sm.computeResizeTargetLocked(client.id, now, false)
-	if !shouldResize {
-		sm.mu.Unlock()
-		return
-	}
-
-	sm.activeCols = cols
-	sm.activeRows = rows
-	sm.lastResizeAt = now
-	sm.lastResizeSource = sourceClientID
-	sm.mu.Unlock()
-
-	if err := sm.slave.ResizeTerminal(cols, rows); err != nil {
-		log.Printf("failed to resize terminal to %dx%d: %v", cols, rows, err)
-		return
-	}
-	sm.broadcastTerminalState("client-resize")
-}
-
-func (sm *SessionManager) reconcileResize(reason string) {
-	now := time.Now()
-	sm.mu.Lock()
-	cols, rows, sourceClientID, shouldResize := sm.computeResizeTargetLocked("", now, true)
-	if !shouldResize {
-		sm.mu.Unlock()
-		return
-	}
-	sm.activeCols = cols
-	sm.activeRows = rows
-	sm.lastResizeAt = now
-	sm.lastResizeSource = sourceClientID
-	sm.mu.Unlock()
-
-	if err := sm.slave.ResizeTerminal(cols, rows); err != nil {
-		log.Printf("failed to reconcile terminal size to %dx%d: %v", cols, rows, err)
-		return
-	}
-	sm.broadcastTerminalState(reason)
-}
-
-func (sm *SessionManager) computeResizeTargetLocked(requestClientID string, now time.Time, allowNonRequester bool) (int, int, string, bool) {
-	if sm.resizeDebounce > 0 && !sm.lastResizeAt.IsZero() && now.Sub(sm.lastResizeAt) < sm.resizeDebounce {
-		return 0, 0, "", false
-	}
-
-	var cols int
-	var rows int
-	source := "policy"
-
-	switch sm.resizePolicy {
-	case "fixed":
-		cols = sm.configuredCols
-		rows = sm.configuredRows
-		source = "fixed"
-	case "leader":
-		if sm.leaderClientID == "" {
-			sm.leaderClientID = sm.pickLeaderFallbackLocked()
-		}
-		if sm.leaderClientID == "" {
-			return 0, 0, "", false
-		}
-		if !allowNonRequester && requestClientID != sm.leaderClientID {
-			if sm.leaderSwitch == "on_idle" && requestClientID != "" {
-				sm.maybeSwitchLeaderOnIdleLocked(requestClientID, now)
-			}
-		}
-		if !allowNonRequester && requestClientID != sm.leaderClientID {
-			return 0, 0, "", false
-		}
-		size, ok := sm.clientSizes[sm.leaderClientID]
-		if !ok {
-			return 0, 0, "", false
-		}
-		cols = size.Columns
-		rows = size.Rows
-		source = sm.leaderClientID
-	case "median":
-		colsVals := make([]int, 0, len(sm.clients))
-		rowsVals := make([]int, 0, len(sm.clients))
-		for client := range sm.clients {
-			size, ok := sm.clientSizes[client.id]
-			if !ok {
-				continue
-			}
-			colsVals = append(colsVals, size.Columns)
-			rowsVals = append(rowsVals, size.Rows)
-		}
-		if len(colsVals) == 0 || len(rowsVals) == 0 {
-			return 0, 0, "", false
-		}
-		cols = medianInt(colsVals)
-		rows = medianInt(rowsVals)
-		source = "median"
-	default:
-		return 0, 0, "", false
-	}
-
-	cols = clamp(cols, sm.minCols, sm.maxCols)
-	rows = clamp(rows, sm.minRows, sm.maxRows)
-
-	if cols == sm.activeCols && rows == sm.activeRows {
-		return 0, 0, "", false
-	}
-
-	return cols, rows, source, true
-}
-
-func (sm *SessionManager) maybeSwitchLeaderOnIdleLocked(candidateClientID string, now time.Time) {
-	if sm.leaderClientID == "" || sm.leaderClientID == candidateClientID {
-		return
-	}
-	if sm.leaderIdle <= 0 {
-		sm.leaderClientID = candidateClientID
-		return
-	}
-
-	leaderSize, ok := sm.clientSizes[sm.leaderClientID]
-	if !ok {
-		sm.leaderClientID = candidateClientID
-		return
-	}
-
-	if leaderSize.UpdatedAt.IsZero() || now.Sub(leaderSize.UpdatedAt) >= sm.leaderIdle {
-		sm.leaderClientID = candidateClientID
-	}
-}
-
-func (sm *SessionManager) pickFirstClientIDLocked() string {
-	var firstID string
-	var firstSeq int64
-	for clientID, seq := range sm.clientOrder {
-		if firstID == "" || seq < firstSeq {
-			firstID = clientID
-			firstSeq = seq
-		}
-	}
-	return firstID
-}
-
-func (sm *SessionManager) pickLatestClientIDLocked() string {
-	var latestID string
-	var latestSeq int64
-	for clientID, seq := range sm.clientOrder {
-		if latestID == "" || seq > latestSeq {
-			latestID = clientID
-			latestSeq = seq
-		}
-	}
-	return latestID
-}
-
-func (sm *SessionManager) pickLeaderFallbackLocked() string {
-	if sm.leaderSelect == "latest" {
-		return sm.pickLatestClientIDLocked()
-	}
-	return sm.pickFirstClientIDLocked()
-}
-
 func (sm *SessionManager) sendConnectionCount() {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
@@ -543,38 +417,16 @@ func (sm *SessionManager) sendConnectionCount() {
 }
 
 func (sm *SessionManager) broadcastTerminalState(reason string) {
-	msg := sm.terminalStateMessage(reason)
-	if msg == nil {
-		return
-	}
-	sm.mu.RLock()
-	for client := range sm.clients {
-		select {
-		case client.send <- msg:
-		default:
-		}
-	}
-	sm.mu.RUnlock()
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	sm.publishLocked(sm.terminalStateMessageLocked(reason), nil)
 }
 
-func (sm *SessionManager) terminalStateMessage(reason string) []byte {
-	sm.mu.RLock()
-	state := terminalState{
-		ActiveCols:    sm.activeCols,
-		ActiveRows:    sm.activeRows,
-		Policy:        sm.resizePolicy,
-		LeaderClient:  sm.leaderClientID,
-		Reason:        reason,
-		SourceClient:  sm.lastResizeSource,
-		Connected:     len(sm.clients),
-		ResizeEnabled: sm.resizePolicy != "fixed",
-	}
-	sm.mu.RUnlock()
-
-	data, err := json.Marshal(state)
-	if err != nil {
-		return nil
-	}
+func (sm *SessionManager) terminalStateMessageLocked(reason string) []byte {
+	state := terminalState{ActiveCols: sm.activeCols, ActiveRows: sm.activeRows,
+		Policy: sm.resizePolicy, LeaderClient: sm.leaderClientID, Reason: reason,
+		SourceClient: sm.lastResizeSource, Connected: len(sm.clients), ResizeEnabled: sm.resizePolicy != "fixed", SizeControl: sm.resizePolicy == "leader"}
+	data, _ := json.Marshal(state)
 	return append([]byte{'8'}, data...)
 }
 
@@ -606,16 +458,6 @@ func clamp(value, min, max int) int {
 		return max
 	}
 	return value
-}
-
-func medianInt(values []int) int {
-	sort.Ints(values)
-	n := len(values)
-	mid := n / 2
-	if n%2 == 1 {
-		return values[mid]
-	}
-	return (values[mid-1] + values[mid]) / 2
 }
 
 // UploadFileMessage represents a file upload message from the client

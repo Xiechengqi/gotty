@@ -225,7 +225,10 @@ enable_basic_auth = true
 credential = "user:pass"
 enable_reconnect = true
 history_replay_bytes = 524288
+history_lines = 5000
 resize_policy = "leader"
+leader_select = "first"
+leader_grace_ms = 5000
 restart_mode = "exec"
 
 preferences {
@@ -238,6 +241,8 @@ preferences {
 }
 ```
 
+Clients share the current size owner's terminal grid by default; a new connection does not preempt it. Reloading restores retained history and Vim screen state from a server checkpoint. See [terminal recovery](docs/terminal-recovery.md) for policies, limits, and compatibility.
+
 ## Key Settings
 
 | Area | Settings |
@@ -245,8 +250,8 @@ preferences {
 | Listen endpoint | `address`, `port`, `path`, `random-url`, `random-url-length` |
 | Input and connections | `permit-write`, `max-connection`, `once`, `timeout`, `permit-arguments`, `pass-headers` |
 | Security | `credential`, `tls`, `tls-crt`, `tls-key`, `tls-ca-crt`, `ws-origin` |
-| Reconnect and replay | `reconnect`, `reconnect-time`, `history-replay-bytes`, `ping-interval` |
-| Terminal size | `width`, `height`, `resize-policy`, `min-cols`, `max-cols`, `min-rows`, `max-rows`, `leader-select`, `leader-switch` |
+| Reconnect and replay | `reconnect`, `reconnect-time`, `history-lines`, `history-replay-bytes`, `ping-interval` |
+| Terminal size | `width`, `height`, `resize-policy`, `min-cols`, `max-cols`, `min-rows`, `max-rows`, `leader-select`, `leader-switch`, `leader-grace-ms` |
 | Display preferences | `preferences.theme`, `font_size`, `font_family`, `cursor_style`, `scrollback_lines`, `alt_is_meta` |
 | API | `enable-api`, `api-probe-timeout`, `api-user-idle-ms`, `api-exec-timeout` |
 | ASR | `enable-asr`, `asr-backend`, `asr-hold-ms`, `asr-hotkey` |

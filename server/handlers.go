@@ -21,13 +21,19 @@ import (
 const replayChunkSize = 64 * 1024
 
 type replayBeginPayload struct {
-	Epoch      string `json:"epoch"`
-	Mode       string `json:"mode"`
-	FromOffset int64  `json:"fromOffset"`
+	Epoch        string `json:"epoch"`
+	Mode         string `json:"mode"`
+	FromOffset   int64  `json:"fromOffset"`
+	Columns      int    `json:"columns,omitempty"`
+	Rows         int    `json:"rows,omitempty"`
+	Sequence     int64  `json:"sequence,omitempty"`
+	Truncated    bool   `json:"truncated,omitempty"`
+	FromSequence int64  `json:"fromSequence,omitempty"`
 }
 
 type replayEndPayload struct {
 	EndOffset int64 `json:"endOffset"`
+	Sequence  int64 `json:"sequence,omitempty"`
 }
 
 func (server *Server) generateHandleWS(ctx context.Context, gracefullCtx context.Context, cancel context.CancelFunc, counter *counter) http.HandlerFunc {
@@ -180,7 +186,7 @@ func (server *Server) processWSConn(ctx context.Context, conn *websocket.Conn, h
 		send:     make(chan []byte, 256),
 		ready:    make(chan struct{}),
 		init:     init,
-		readOnly: hasShareRecord && shareRecord.ReadOnly,
+		readOnly: !server.options.PermitWrite || hasShareRecord && shareRecord.ReadOnly,
 	}
 
 	select {
@@ -261,6 +267,7 @@ func (server *Server) sendReplayMessages(ctx context.Context, conn *websocket.Co
 		Epoch:      replay.Epoch,
 		Mode:       mode,
 		FromOffset: replay.FromOffset,
+		Columns:    replay.Columns, Rows: replay.Rows, Sequence: replay.Sequence, Truncated: replay.Truncated, FromSequence: replay.FromSequence,
 	})
 	if err != nil {
 		return err
@@ -294,7 +301,13 @@ func (server *Server) sendReplayMessages(ctx context.Context, conn *websocket.Co
 		}
 	}
 
-	done, err := json.Marshal(replayEndPayload{EndOffset: replay.EndOffset})
+	for _, event := range replay.Events {
+		data, _ := json.Marshal(event)
+		if err := conn.WriteMessage(websocket.TextMessage, append([]byte{'c'}, data...)); err != nil {
+			return err
+		}
+	}
+	done, err := json.Marshal(replayEndPayload{EndOffset: replay.EndOffset, Sequence: replay.Sequence})
 	if err != nil {
 		return err
 	}
@@ -481,12 +494,12 @@ func (server *Server) handleThemes(w http.ResponseWriter, r *http.Request) {
 // applies any individual config overrides on top.
 // Only non-zero values are included so xterm.js keeps its defaults for the rest.
 func (server *Server) buildPreferences() map[string]interface{} {
+	out := map[string]interface{}{"scrollback-lines": server.options.HistoryLines}
 	if server.options.Preferences == nil {
-		return map[string]interface{}{}
+		return out
 	}
 
 	prefs := server.options.Preferences
-	out := make(map[string]interface{})
 
 	// Resolve theme
 	themeName := prefs.Theme

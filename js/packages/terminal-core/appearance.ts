@@ -40,7 +40,7 @@ export const NORD_THEME = xtermTheme(BUILTIN_THEMES.nord);
 
 export function defaultDisplayOptions(): DisplayOptions {
     return { fontSize: DEFAULT_FONT_SIZE, fontFamily: DEFAULT_FONT_FAMILY,
-        fontWeight: 400, fontWeightBold: 700, lineHeight: 1, letterSpacing: 0, scrollback: 500, cursorBlink: false,
+        fontWeight: 400, fontWeightBold: 700, lineHeight: 1, letterSpacing: 0, scrollback: 5000, cursorBlink: false,
         customGlyphs: true, rescaleOverlappingGlyphs: true, theme: { ...NORD_THEME } };
 }
 

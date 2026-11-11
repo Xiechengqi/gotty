@@ -308,6 +308,11 @@ export class GoTTYXterm {
     term: Terminal;
 
     resizeListener: () => void;
+    private requestedSize?: {cols:number;rows:number};
+    private serverSize?: {cols:number;rows:number};
+    private resizeCallback?: (cols:number,rows:number)=>void;
+    private sizeControlSender?: ()=>void;
+    private sizeControlBtn?: HTMLButtonElement;
     viewportResizeListener: (() => void) | null = null;
     private fitRequestId: number | null = null;
 
@@ -495,7 +500,7 @@ export class GoTTYXterm {
         if (this.showTerminalStateOverlay) {
             this.terminalStateElem = elem.ownerDocument.createElement("div");
             this.terminalStateElem.className = "terminal-state";
-            this.terminalStateElem.style.cssText = "position:fixed;top:170px;right:10px;background:rgba(0,0,0,0.7);color:#fff;padding:4px 8px;border-radius:4px;font-size:11px;z-index:1000;";
+            this.terminalStateElem.style.cssText = "position:fixed;top:234px;right:10px;background:rgba(0,0,0,0.7);color:#fff;padding:4px 8px;border-radius:4px;font-size:11px;z-index:1000;";
             this.terminalStateElem.textContent = "Size policy: --";
             elem.appendChild(this.terminalStateElem);
         }
@@ -835,11 +840,18 @@ export class GoTTYXterm {
 
     private fitTerminal(): void {
         // Fit terminal size to the container so the viewport can reach the bottom.
-        this.fitAddOn.fit();
+        const size = this.fitAddOn.proposeDimensions();
+        if (!size || !this.elem.clientWidth || !this.elem.clientHeight) return;
+        if (!this.requestedSize || this.requestedSize.cols !== size.cols || this.requestedSize.rows !== size.rows) {
+            this.requestedSize = size;
+            this.resizeCallback?.(size.cols,size.rows);
+        }
+        const grid = this.serverSize || size;
+        this.term.resize(grid.cols,grid.rows);
     }
 
     info(): { columns: number, rows: number } {
-        return { columns: this.term.cols, rows: this.term.rows };
+        return { columns: this.requestedSize?.cols ?? this.term.cols, rows: this.requestedSize?.rows ?? this.term.rows };
     };
 
     // This gets called from the Websocket's onReceive handler
@@ -856,6 +868,7 @@ export class GoTTYXterm {
 
     setReplayMode(active: boolean) {
         this.replaying = active;
+        this.elem.dataset.replayActive = String(active);
     }
 
     // 注册输出回调（返回解绑函数）
@@ -984,6 +997,11 @@ export class GoTTYXterm {
     };
 
     updateTerminalState(state: TerminalStatePayload) {
+        const cols=state.activeCols, rows=state.activeRows;
+        if (Number.isInteger(cols) && cols>0 && cols<=4096 && Number.isInteger(rows) && rows>0 && rows<=4096) {
+            this.serverSize={cols,rows}; this.term.resize(cols,rows);
+        }
+        if (this.sizeControlBtn && state.reason !== 'snapshot') this.sizeControlBtn.disabled = state.sizeControl !== true;
         if (!this.terminalStateElem) {
             return;
         }
@@ -1083,23 +1101,39 @@ export class GoTTYXterm {
         };
     }
 
-    onResize(callback: (colmuns: number, rows: number) => void) {
-        this.onResizeHandler = this.term.onResize(() => {
-            callback(this.term.cols, this.term.rows);
-        });
-    };
+    onResize(callback: (columns: number, rows: number) => void) {
+        this.resizeCallback=callback;
+    }
+
+    isVisible(): boolean { return !document.hidden && !!this.elem.clientWidth && !!this.elem.clientHeight; }
+    setSizeControlSender(sender: ()=>void): void {
+        this.sizeControlSender=sender;
+        if (this.readOnly || this.sizeControlBtn) return;
+        const button=this.elem.ownerDocument.createElement('button');
+        button.className='terminal-size-control';
+        button.style.cssText=this.restartBtn.style.cssText;
+        button.style.top='202px'; button.title='Take size control'; button.setAttribute('aria-label','Take size control');
+        button.textContent='↔';
+        button.addEventListener('click',()=>{this.sizeControlSender?.();this.term.focus();});
+        this.elem.appendChild(button); this.sizeControlBtn=button;
+    }
+    onHistoryStatus(truncated: boolean): void {
+        this.elem.dataset.historyTruncated=String(truncated);
+        if (truncated) this.showMessage('Older output exceeded the retained history limit.',4000);
+    }
 
     deactivate(): void {
         this.onDataHandler?.dispose();
         this.onResizeHandler?.dispose();
         this.onDataHandler = undefined;
         this.onResizeHandler = undefined;
+        this.resizeCallback = undefined;
         this.term.blur();
     }
 
     reset(): void {
         this.removeMessage();
-        this.term.clear();
+        this.term.reset();
         this.hideUploadModal();
     }
 

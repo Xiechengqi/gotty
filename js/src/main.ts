@@ -146,7 +146,7 @@ const elem = document.getElementById("terminal")
 if (elem !== null) {
     var term: GoTTYXterm;
     const shareReadOnly = typeof gotty_share_readonly !== "undefined" && gotty_share_readonly;
-    term = new GoTTYXterm(elem, gotty_preferences, { readOnly: shareReadOnly });
+    term = new GoTTYXterm(elem, gotty_preferences, { readOnly: shareReadOnly || !gotty_permit_write });
     initThemePicker(term.term, { controls: !shareReadOnly, refit: () => term.refit() });
     initMobileKeys(term, !shareReadOnly && typeof gotty_mobile_keys !== "undefined" && gotty_mobile_keys);
     const confirmClose = createConfirmClose(typeof gotty_confirm_close !== "undefined" && gotty_confirm_close);

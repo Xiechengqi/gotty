@@ -61,7 +61,7 @@ export function initHubManager(basePath: string, authToken: string): () => void 
     const submit = action('接入 Hub'); submit.type = 'submit'; submit.disabled = true;
     document.body.append(panel);
     const terminalState = document.querySelector<HTMLElement>('.terminal-state'); const previousTop = terminalState?.style.top;
-    if (terminalState) terminalState.style.top = '202px';
+    if (terminalState) terminalState.style.top = '234px';
     const headers = () => ({'Content-Type': 'application/json', ...(authToken ? {Authorization: `Bearer ${authToken}`} : {})});
     const view = Array.from(crypto.getRandomValues(new Uint8Array(32)), b => b.toString(16).padStart(2, '0')).join('');
     let saved: HubState | undefined; let editing = false; let submitting = false; let syncing = false; let disposed = false; let revision = 0;

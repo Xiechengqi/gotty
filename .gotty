@@ -54,9 +54,16 @@
 //       To enable reconnection, set `true` to `enable_reconnect`
 // reconnect_time = 10
 
-// [int] Bytes of terminal history to replay on refresh/reconnect.
+// [int] Bytes of raw history to replay to legacy browsers.
 //       0 means replay all buffered history.
 // history_replay_bytes = 524288
+
+// [int] Normal-screen history lines retained for browser state restoration.
+//       0 disables scrollback; memory and checkpoint byte limits also apply.
+// history_lines = 5000
+
+// [int] Keep size ownership for a refreshing browser before fallback election.
+// leader_grace_ms = 5000
 
 // [int] Timeout seconds for waiting a client (0 to disable)
 // timeout = 60
