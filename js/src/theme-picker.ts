@@ -14,7 +14,10 @@ const STORAGE_FONT_FAMILY = "gotty-font-family";
 const PANEL_OPEN_EVENT = "gotty-panel-open";
 
 function applyTheme(term: Terminal | undefined, colors: Record<string, string> | undefined) {
-    if (term && colors) term.options.theme = xtermTheme(colors);
+    if (term && colors) {
+        term.options.theme = xtermTheme(colors);
+        if (colors.background) document.body.style.setProperty("--gotty-terminal-background", colors.background);
+    }
 }
 
 // Re-fit the terminal after a font change. xterm measures the new cell size

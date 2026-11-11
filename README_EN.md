@@ -49,7 +49,7 @@ The project implements an HTTP / WebSocket web terminal and sharing flow. It doe
 - Read-only by default. Browser input is allowed only when `--permit-write` / `-w` is enabled.
 - Multiple browser clients share the same terminal session, with a connection counter and optional connection limit.
 - xterm.js frontend with WebGL rendering, link detection, Unicode support, responsive sizing, and mobile recovery behavior.
-- Built-in display panel: Nord and bundled Source Code Pro by default, with runtime theme, text size, and font choices persisted to localStorage. Additional open-source fonts load from this server on demand and remain cached across reloads.
+- Built-in display panel: Nord and bundled Source Code Pro by default, with runtime theme, text size, and font choices persisted to localStorage. Paper offers a soft beige background (`#f5f5d5`) and a matching light ANSI palette. Additional open-source fonts load from this server on demand and remain cached across reloads.
 - Automatically copies selected terminal text to the clipboard and shows a browser notification after success.
 - File upload button and zmodem transfer channel.
 - Automatic reconnect and offset-based terminal output replay after refresh or disconnect.

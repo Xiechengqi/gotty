@@ -67,9 +67,10 @@ export function displayOptions(preferences: Record<string, unknown>, themes: The
     return out;
 }
 
-export function themeLabel(name: string): string {
+export function themeLabel(name: string, locale = "en-US"): string {
     const labels: Record<string, string> = { default: "Default", nord: "Nord", dracula: "Dracula",
-        "solarized-dark": "Solarized Dark", monokai: "Monokai", light: "Light" };
+        "solarized-dark": "Solarized Dark", monokai: "Monokai", light: "Light",
+        paper: locale.startsWith("zh") ? "柔和米色" : "Paper" };
     return labels[name] || name;
 }
 

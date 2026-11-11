@@ -1,5 +1,5 @@
 import {expect,it} from 'vitest';
-import {defaultDisplayOptions,displayOptions,NORD_THEME,terminalPreferences} from '../../packages/terminal-core/appearance';
+import {BUILTIN_THEMES,defaultDisplayOptions,displayOptions,NORD_THEME,terminalPreferences} from '../../packages/terminal-core/appearance';
 it('uses the same Nord palette and Source Code Pro metrics in both clients',()=>{
  const options=defaultDisplayOptions();expect(options.fontSize).toBe(14);expect(options.fontFamily).toBe("'Source Code Pro', monospace");expect(options.theme).toEqual(NORD_THEME);expect(options.scrollback).toBe(500);
 });
@@ -12,4 +12,18 @@ it('keeps remote font size, scrollback and cursor settings while applying picker
 it('translates legacy theme selection and discards invalid preference values',()=>{
  expect(terminalPreferences({'font-size':NaN,'cursor-style':'invalid','scrollback-lines':-1})).toEqual({});
  expect(terminalPreferences({theme:{selection:'#123456'}}).theme?.selectionBackground).toBe('#123456');
+});
+it('keeps Paper text, ANSI colors and the cursor readable on its light surfaces',()=>{
+ const paper=BUILTIN_THEMES.paper;
+ const luminance=(hex:string)=>{
+  const linear=[1,3,5].map(index=>parseInt(hex.slice(index,index+2),16)/255).map(value=>value<=0.04045?value/12.92:((value+0.055)/1.055)**2.4);
+  return linear[0]*0.2126+linear[1]*0.7152+linear[2]*0.0722;
+ };
+ const contrast=(a:string,b:string)=>(Math.max(luminance(a),luminance(b))+0.05)/(Math.min(luminance(a),luminance(b))+0.05);
+ for(const name of ['foreground','black','red','green','yellow','blue','magenta','cyan','white','brightBlack','brightRed','brightGreen','brightYellow','brightBlue','brightMagenta','brightCyan','brightWhite']) {
+  expect(contrast(paper[name],paper.background),name).toBeGreaterThanOrEqual(4.5);
+ }
+ expect(contrast(paper.foreground,paper.selection)).toBeGreaterThanOrEqual(4.5);
+ expect(contrast(paper.cursor,paper.background)).toBeGreaterThanOrEqual(3);
+ expect(contrast(paper.cursorAccent,paper.cursor)).toBeGreaterThanOrEqual(4.5);
 });
