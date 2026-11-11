@@ -298,7 +298,7 @@ curl -H 'Authorization: Bearer user:pass' http://127.0.0.1:8080/api/v1/status
 | Path | Purpose |
 | --- | --- |
 | `~/.gotty` / `~/.gotty/config` | Default HCL configuration file; use the latter when the former is a directory |
-| `~/.gotty/hub.json` | Hub binding and device credentials; use `~/.gotty-hub.json` when `~/.gotty` is a file |
+| `~/.gotty/hub/<identity>.json` | Hub credentials isolated by listening address, port and base path; use `~/.gotty-hub-bindings/<identity>.json` when `~/.gotty` is a file |
 | `~/.gotty-http-tunnel` | http-tunnel-client runtime directory used by Share Manager |
 | `~/.gotty-shares.json` | Share history, status, owner, and access-mode registry |
 | `bindata/static/` | Frontend assets embedded into the gotty binary |
@@ -358,3 +358,5 @@ make test-e2e
 esbuild transpiles the frontend; TypeScript 7 checks types separately. Commit rebuilt JS, sourcemaps and license inventories with frontend changes. CI checks all embedded assets and the xterm license entries.
 
 `./scripts/build-linux.sh` (also used by `make cross_compile`) builds Linux amd64/arm64 with a matching embedded tunnel client, and restores the original local payload on exit. Pass an architecture to build one target. Other platforms can be built with Go, but have no bundled tunnel-client release artifact. Docker builds the frontend on the build platform, cross-compiles Go for the target, and uses Alpine 3.24. The workflows publish Linux amd64/arm64 only and require shared validation first. Tunnel downloads still follow the external `latest` release; pin that artifact for fully reproducible release builds.
+
+Hub identities remain stable across restarts. Use `--hub-state-file` to pin an identity independently of listener changes. A process lock rejects simultaneous use of one state file before the command starts. Legacy `~/.gotty/hub.json` and `~/.gotty-hub.json` are preserved but not automatically adopted: verify which instance owns the saved `instance_id`, then select the old file explicitly for that instance only. Other instances should register independently. A shared legacy file cannot recover credentials that were already overwritten by another instance.

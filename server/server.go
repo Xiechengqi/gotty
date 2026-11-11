@@ -139,6 +139,21 @@ func (server *Server) Run(ctx context.Context, options ...RunOption) error {
 	for _, opt := range options {
 		opt(opts)
 	}
+	// Reject duplicate identities before starting the user's command. The
+	// connector owns the lock once its goroutine starts; early failures release it.
+	hubRunning := false
+	if !server.options.HubDisabled {
+		hub, err := newHubManager(cctx, server)
+		if err != nil {
+			return errors.Wrap(err, "initialize Hub connector")
+		}
+		server.hub = hub
+		defer func() {
+			if !hubRunning {
+				hub.closeState()
+			}
+		}()
+	}
 
 	// Initialize shared session
 	slave, err := server.factory.New(nil, nil)
@@ -190,11 +205,8 @@ func (server *Server) Run(ctx context.Context, options ...RunOption) error {
 	}
 
 	if !server.options.HubDisabled {
-		server.hub, err = newHubManager(cctx, server)
-		if err != nil {
-			return errors.Wrap(err, "initialize Hub connector")
-		}
 		server.hub.cancelRun = cancel
+		hubRunning = true
 		go server.hub.run()
 	}
 	go server.sessionManager.Run()

@@ -47,7 +47,7 @@ https://gotty-<suffix>.httptunnel.top
 
 使用 `gotty --permit-write bash` 启动后，点击终端页面右上角“接入 Hub”，在按钮旁展开的面板中填写 Hub 的 HTTP(S) 地址和已注册的用户名；可选填写“Hub 中显示的名字”，留空自动生成。同一用户下不能注册同名实例，名称会去除首尾空白，ASCII 字母不区分大小写。用户名不存在时，页面提示先到 Hub Web 注册并提供链接。Hub 默认开启，可用 `--hub-disabled` 关闭（环境变量 `GOTTY_HUB_DISABLED=true` 或配置 `hub_disabled = true`）；`--permit-write` 仍控制远程终端是否可写，观察者始终只读。
 
-绑定及设备凭据默认保存在权限 `0600` 的 `~/.gotty/hub.json`；若 `~/.gotty` 是已有配置文件，则使用 `~/.gotty-hub.json`，可通过 `--hub-state-file` 修改。已有 GoTTY 密码时自动复用登录态；无密码且启用 Hub 时，主站访问者可以配置绑定，公开分享页面不能查看或管理 Hub 配置。成功后显示绿色“接入 Hub 地址 成功”提示，输入框变为只读；“编辑”可修改配置和显示名字，“重新接入”复用原实例身份，“断开”立即停止隧道并持久保留配置，重启 GoTTY 后也不会自动恢复已断开的连接。修改 Hub 地址或用户名失败时保留原绑定；跨 Hub 切换后原 Hub 中的记录保持离线，可在原 Hub 解绑。设备请求失败可直接重试，不需要验证码、Hub 密码或额外管理令牌。
+绑定及设备凭据按监听地址、端口和基路径分别保存在权限 `0600` 的 `~/.gotty/hub/<标识>.json`；若 `~/.gotty` 是已有配置文件，则使用 `~/.gotty-hub-bindings/<标识>.json`。重启保持同一身份，可通过 `--hub-state-file` 固定文件路径；同一文件被另一个进程占用时，在启动用户命令前报错。旧 `~/.gotty/hub.json` / `~/.gotty-hub.json` 会保留且不自动复用：先核对其 instance_id 属于哪个实例，只给该实例显式指定旧文件；其他实例独立接入，避免再次顶替。已有 GoTTY 密码时自动复用登录态；无密码且启用 Hub 时，主站访问者可以配置绑定，公开分享页面不能查看或管理 Hub 配置。成功后显示绿色“接入 Hub 地址 成功”提示，输入框变为只读；“编辑”可修改配置和显示名字，“重新接入”复用原实例身份，“断开”立即停止隧道并持久保留配置，重启 GoTTY 后也不会自动恢复已断开的连接。修改 Hub 地址或用户名失败时保留原绑定；跨 Hub 切换后原 Hub 中的记录保持离线，可在原 Hub 解绑。设备请求失败可直接重试，不需要验证码、Hub 密码或额外管理令牌。
 
 GoTTY 默认支持 HTTP 和 HTTPS Hub，分别主动通过 WS 或 WSS 连接，终端直接复用本地 PTY 会话；Hub 连接不代理本地 HTTP 地址。Hub 与 GoTTY 使用相同的 Nord 默认主题、Source Code Pro 字体、14px 默认字号和显示偏好翻译，远程主题目录、字号、光标和回滚行数经专用终端通道传递。Hub 终端右侧提供连接数、显示设置、清屏、原生文件上传、重启和实例设置；重启与分享管理仅实例所有者可用，观察者保持只读。状态点在本地页面和 Hub 间同步：红色为正在查看、黄色为未查看时有新输出、绿色为输出已停止但尚未查看、灰色为无未读输出。可用 `--hub-allow-http=false` 仅允许 HTTPS Hub。
 
@@ -304,7 +304,7 @@ curl -H 'Authorization: Bearer user:pass' http://127.0.0.1:8080/api/v1/status
 | 路径 | 用途 |
 | --- | --- |
 | `~/.gotty` / `~/.gotty/config` | 默认 HCL 配置文件；前者为目录时使用后者 |
-| `~/.gotty/hub.json` | Hub 绑定和设备凭据；`~/.gotty` 为文件时使用 `~/.gotty-hub.json` |
+| `~/.gotty/hub/<标识>.json` | 按监听配置隔离的 Hub 身份；`~/.gotty` 为文件时使用 `~/.gotty-hub-bindings/<标识>.json`；可用 `--hub-state-file` 固定路径 |
 | `~/.gotty-http-tunnel` | Share Manager 的 http-tunnel-client 运行态目录 |
 | `~/.gotty-shares.json` | share 历史、状态、owner 和访问模式记录 |
 | `bindata/static/` | 嵌入 gotty binary 的前端静态资源 |

@@ -14,9 +14,13 @@ import (
 
 func (h *hubManager) bindingStateLocked() map[string]any {
 	b := h.binding
-	return map[string]any{"url": b.URL, "username": b.Username, "name": b.Name, "instance_id": b.Instance, "online": h.online, "paused": b.Paused}
+	return map[string]any{"url": b.URL, "username": b.Username, "name": b.Name, "instance_id": b.Instance, "online": h.online, "paused": b.Paused, "superseded": h.superseded, "notice": h.stateNotice}
 }
 func (h *hubManager) wakeLocked(restart bool) {
+	h.superseded = false
+	if h.binding.Instance != "" {
+		h.stateNotice = ""
+	}
 	if restart && h.connectionCancel != nil {
 		h.connectionCancel()
 	}

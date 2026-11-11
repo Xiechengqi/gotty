@@ -1,6 +1,6 @@
 // Local management UI. Device credentials stay in the GoTTY backend.
 declare var gotty_hub_enabled: boolean;
-type HubState = {url: string; username: string; name: string; instance_id: string; online: boolean; paused?: boolean};
+type HubState = {url: string; username: string; name: string; instance_id: string; online: boolean; paused?: boolean; superseded?: boolean; notice?: string};
 const PANEL_OPEN_EVENT = 'gotty-panel-open';
 
 export function initHubManager(basePath: string, authToken: string): () => void {
@@ -77,7 +77,7 @@ export function initHubManager(basePath: string, authToken: string): () => void 
         submit.textContent = readonly ? '编辑' : '接入 Hub'; submit.type = readonly ? 'button' : 'submit'; submit.disabled = submitting;
         reconnect.hidden = !bound; disconnect.hidden = !bound; cancel.hidden = !bound || !editing;
         reconnect.disabled = submitting || editing; disconnect.disabled = submitting || editing || !!value.paused; cancel.disabled = submitting;
-        connection.textContent = bound ? (value.paused ? '已断开 Hub，配置已保留' : value.online ? '已连接到 Hub' : '已注册，正在连接 Hub…') : '尚未接入 Hub';
+        connection.textContent = value.superseded ? '此身份已被另一个 GoTTY 使用，已暂停重连。请检查是否共用了身份文件。' : value.notice || (bound ? (value.paused ? '已断开 Hub，配置已保留' : value.online ? '已连接到 Hub' : '已注册，正在连接 Hub…') : '尚未接入 Hub');
         position();
     }
     async function state(): Promise<HubState> {

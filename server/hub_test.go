@@ -21,6 +21,7 @@ func TestHubManagementFollowsLocalControl(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
+	t.Cleanup(h.closeState)
 	r := httptest.NewRequest("GET", "http://localhost/-/hub", nil)
 	if !h.authorize(r) {
 		t.Fatal("passwordless primary site should allow management")
@@ -79,18 +80,17 @@ func TestHubDefaultStateSurvivesReloadWithEitherConfigLayout(t *testing.T) {
 	for _, legacyConfig := range []bool{false, true} {
 		t.Run(fmt.Sprintf("legacyConfig=%t", legacyConfig), func(t *testing.T) {
 			taskHome := t.TempDir()
-			t.Setenv("HOME", taskHome)
 			configPath := filepath.Join(taskHome, ".gotty")
 			config := []byte(`port = "2222"`)
-			wantPath := filepath.Join(configPath, "hub.json")
+			wantPath, _ := hubStatePaths(&Options{}, taskHome)
 			if legacyConfig {
 				if err := os.WriteFile(configPath, config, 0600); err != nil {
 					t.Fatal(err)
 				}
-				wantPath = filepath.Join(taskHome, ".gotty-hub.json")
+				wantPath, _ = hubStatePaths(&Options{}, taskHome)
 			}
 			s := &Server{options: &Options{}}
-			h, err := newHubManager(context.Background(), s)
+			h, err := newHubManagerAt(context.Background(), s, taskHome)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -101,10 +101,12 @@ func TestHubDefaultStateSurvivesReloadWithEitherConfigLayout(t *testing.T) {
 			if err := h.saveLocked(); err != nil {
 				t.Fatal(err)
 			}
-			reloaded, err := newHubManager(context.Background(), s)
+			h.closeState()
+			reloaded, err := newHubManagerAt(context.Background(), s, taskHome)
 			if err != nil {
 				t.Fatal(err)
 			}
+			t.Cleanup(reloaded.closeState)
 			if reloaded.binding != h.binding {
 				t.Fatal("default Hub binding was not restored")
 			}

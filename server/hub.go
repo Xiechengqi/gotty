@@ -23,7 +23,6 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/sorenisanerd/gotty/pkg/homedir"
 )
 
 var errHubSuperseded = errors.New("Hub device connection superseded")
@@ -53,6 +52,10 @@ type hubManager struct {
 	binding          hubBinding
 	pending          hubBinding
 	path             string
+	stateLock        *os.File
+	closeStateOnce   sync.Once
+	stateNotice      string
+	superseded       bool
 	online           bool
 	leases           map[string]time.Time
 	lastOutput       time.Time
@@ -73,21 +76,25 @@ func hubRandom() string {
 	return hex.EncodeToString(b)
 }
 func newHubManager(ctx context.Context, s *Server) (*hubManager, error) {
-	stateFile := s.options.HubStateFile
-	if stateFile == "" {
-		stateFile = "~/.gotty/hub.json"
+	userDir, err := os.UserHomeDir()
+	if err != nil {
+		return nil, err
 	}
-	p := homedir.Expand(stateFile)
-	// Keep the legacy ~/.gotty config file usable when Hub is enabled by default.
-	if stateFile == "~/.gotty/hub.json" {
-		if info, err := os.Stat(filepath.Dir(p)); err == nil && !info.IsDir() {
-			p = homedir.Expand("~/.gotty-hub.json")
+	return newHubManagerAt(ctx, s, userDir)
+}
+
+func newHubManagerAt(ctx context.Context, s *Server, userDir string) (_ *hubManager, err error) {
+	p, legacy := hubStatePaths(s.options, userDir)
+	lock, p, err := lockHubState(p)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if err != nil {
+			_ = lock.Close()
 		}
-	}
-	if e := os.MkdirAll(filepath.Dir(p), 0700); e != nil {
-		return nil, e
-	}
-	h := &hubManager{server: s, ctx: ctx, path: p, leases: map[string]time.Time{}, color: "gray", wake: make(chan struct{}, 1)}
+	}()
+	h := &hubManager{server: s, ctx: ctx, path: p, stateLock: lock, leases: map[string]time.Time{}, color: "gray", wake: make(chan struct{}, 1)}
 	if b, e := os.ReadFile(p); e == nil {
 		if e = os.Chmod(p, 0600); e != nil {
 			return nil, e
@@ -107,6 +114,12 @@ func newHubManager(ctx context.Context, s *Server) (*hubManager, error) {
 		}
 	} else if !os.IsNotExist(e) {
 		return nil, e
+	}
+	if h.binding.Instance == "" && legacy != "" {
+		if _, e := os.Stat(legacy); e == nil {
+			h.stateNotice = fmt.Sprintf("发现旧共享身份文件 %s，已保留且未自动复用。请先确认它所属的实例，再用 --hub-state-file 指定该文件恢复原绑定；其他实例应独立接入。", legacy)
+			log.Printf("Hub uses isolated identity %s; legacy binding %s was preserved. Select it explicitly with --hub-state-file only after confirming its owner.", p, legacy)
+		}
 	}
 	return h, nil
 }
@@ -259,6 +272,7 @@ func (h *hubManager) status() hubFrame {
 	return hubFrame{Kind: "status", Data: b}
 }
 func (h *hubManager) run() {
+	defer h.closeState()
 	backoff := time.Second
 	for {
 		if h.ctx.Err() != nil {
@@ -278,7 +292,10 @@ func (h *hubManager) run() {
 			}
 			h.mu.Unlock()
 			if errors.Is(e, errHubSuperseded) {
-				log.Printf("Hub device replaced by another connection; reconnect paused until restart")
+				h.mu.Lock()
+				h.superseded = true
+				h.mu.Unlock()
+				log.Printf("Hub identity is connected elsewhere; reconnect paused. Check for copied credentials or shared --hub-state-file paths.")
 				select {
 				case <-h.ctx.Done():
 					return
@@ -383,6 +400,7 @@ func (h *hubManager) connect(b hubBinding) error {
 		return ctx.Err()
 	}
 	h.online = true
+	h.superseded = false
 	h.revision = 0
 	h.mu.Unlock()
 	asr := map[string]*websocket.Conn{}

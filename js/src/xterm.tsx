@@ -344,7 +344,7 @@ export class GoTTYXterm {
     // 输出/输入回调列表，用于空闲提醒等功能（可解绑）
     private outputCallbacks: Set<() => void> = new Set();
     private inputCallbacks: Set<() => void> = new Set();
-    private connectTime: number = 0;
+    private replaying = false;
     private selectionCallbacks: Set<() => void> = new Set();
     private uploadCallbacks: Set<(fileName: string, progress: number) => void> = new Set();
     private lastCopyNotificationText: string = "";
@@ -838,11 +838,20 @@ export class GoTTYXterm {
     };
 
     // This gets called from the Websocket's onReceive handler
-    output(data: Uint8Array) {
-        this.zmodemAddon.consume(data);
+    output(data: Uint8Array, replay = false) {
+        if (replay) this.term.write(data);
+        else this.zmodemAddon.consume(data);
         // 通知所有输出回调
         this.outputCallbacks.forEach((cb) => cb());
     };
+
+    flushOutput(callback: () => void) {
+        this.term.write(new Uint8Array(0), callback);
+    }
+
+    setReplayMode(active: boolean) {
+        this.replaying = active;
+    }
 
     // 注册输出回调（返回解绑函数）
     onOutput(callback: () => void): () => void {
@@ -1015,26 +1024,8 @@ export class GoTTYXterm {
             return
         }
 
-        this.connectTime = Date.now();
-
         this.onDataHandler = this.term.onData((input) => {
-            // During the first few seconds after connection, filter out
-            // terminal query responses that xterm.js generates automatically.
-            // The WebSocket round-trip latency causes these to arrive at the
-            // PTY after the shell has moved on from its startup queries,
-            // so they get echoed as visible garbled text.
-            // After the startup window, let everything through so that
-            // applications (vim, tmux, etc.) can query the terminal normally.
-            if (Date.now() - this.connectTime < 3000) {
-                const filtered = input.replace(
-                    /\x1b(?:\[\?[0-9;]*c|\[>[0-9;]*c|\[[0-9;]*R|\]1[0-2];[^\x07\x1b]*(?:\x07|\x1b\\)|\[\?[0-9;]*\$y)/g,
-                    ''
-                );
-                if (filtered.length === 0) {
-                    return;
-                }
-                input = filtered;
-            }
+            if (this.replaying) return;
             input = this.inputTransformer ? this.inputTransformer(input) : input;
             if (input === "") return;
             this.inputCallbacks.forEach((cb) => cb());

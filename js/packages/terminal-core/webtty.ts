@@ -43,7 +43,10 @@ export interface Terminal {
     /*
      * Process output from the server side
      */
-    output(data: Uint8Array): void;
+    output(data: Uint8Array, replay?: boolean): void;
+    // Drain the asynchronous terminal parser, including automatic query replies.
+    flushOutput?(callback: () => void): void;
+    setReplayMode?(active: boolean): void;
 
     /*
      * Display a message overlay on the terminal
@@ -172,6 +175,7 @@ export class WebTTY {
     replayActive: boolean;
     replayMode: "resume" | "tail" | "";
     skipNextOutputOffset: boolean;
+    private replayGeneration = 0;
 
     /*
      * The server's buffer size. If a single message exceeds this size, it will
@@ -420,7 +424,7 @@ export class WebTTY {
 
     private handleOutput(payload: string): void {
         const decoded = Uint8Array.from(atob(payload), c => c.charCodeAt(0));
-        this.term.output(decoded);
+        this.term.output(decoded, this.replayMode !== "");
         if (this.epoch || this.replayActive) {
             if (this.skipNextOutputOffset) {
                 this.skipNextOutputOffset = false;
@@ -433,10 +437,12 @@ export class WebTTY {
     }
 
     private handleReplayBegin(payload: ReplayBeginPayload): void {
+        this.replayGeneration++;
         this.epoch = payload.epoch || "";
         this.lastOffset = Number.isFinite(payload.fromOffset) ? payload.fromOffset : 0;
         this.replayMode = payload.mode === "resume" ? "resume" : "tail";
         this.replayActive = true;
+        this.term.setReplayMode?.(true);
 
         if (this.replayMode === "tail") {
             this.term.reset();
@@ -452,14 +458,25 @@ export class WebTTY {
             this.lastOffset = payload.endOffset;
         }
         const wasTail = this.replayMode === "tail";
-        this.replayActive = false;
+        const generation = this.replayGeneration;
         this.replayMode = "";
         this.skipNextOutputOffset = false;
-        if (wasTail) {
-            this.term.removeMessage();
-            this.term.scrollToBottom?.();
-            this.term.focus?.();
-        }
+        // The replay-end frame arrives before xterm has parsed the replay.
+        // Release suppression at the parser boundary, before queued live output.
+        const finish = () => {
+            if (this.stopped || generation !== this.replayGeneration) return;
+            this.replayActive = false;
+            this.replayMode = "";
+            this.skipNextOutputOffset = false;
+            this.term.setReplayMode?.(false);
+            if (wasTail) {
+                this.term.removeMessage();
+                this.term.scrollToBottom?.();
+                this.term.focus?.();
+            }
+        };
+        if (this.term.flushOutput) this.term.flushOutput(finish);
+        else finish();
     }
 
     private applyReconnectHint(seconds: number): void {
@@ -576,11 +593,13 @@ export class WebTTY {
      * strings will be encoded as UTF-8. Uint8Arrays are passed along as-is.
      */
     private sendInput(input: string | Uint8Array) {
+        // Historical queries must never send replies into the current PTY.
+        if (this.replayActive || this.stopped) return;
         let effectiveBufferSize = this.bufSize - 1;
         let dataString: string;
 
         if (typeof input === "string") {
-            dataString = input;
+            dataString = Array.from(new TextEncoder().encode(input), byte => String.fromCharCode(byte)).join('');
         } else {
             dataString = String.fromCharCode(...input)
         }
