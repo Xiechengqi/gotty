@@ -57,6 +57,10 @@ type resizeDimensions struct {
 	ViewportHeight int
 	UpdatedAt      time.Time
 	Visible        bool
+	InputClass     string
+	Presence       bool
+	HiddenSince    time.Time
+	StableSince    time.Time
 }
 
 type terminalState struct {
@@ -69,6 +73,10 @@ type terminalState struct {
 	Connected     int    `json:"connectedClients"`
 	ResizeEnabled bool   `json:"resizeEnabled"`
 	SizeControl   bool   `json:"sizeControl"`
+	LeaderDevice  string `json:"leaderDevice,omitempty"`
+	LeaderVisible bool   `json:"leaderVisible"`
+	ControlReason string `json:"controlReason,omitempty"`
+	ResizeReason  string `json:"resizeReason,omitempty"`
 }
 
 type SessionManager struct {
@@ -93,6 +101,10 @@ type SessionManager struct {
 	leaderKey          string
 	leaderExpires      time.Time
 	resizeDue          time.Time
+	adaptiveCandidate  string
+	adaptiveSince      time.Time
+	controlReason      string
+	lastResizeReason   string
 	resizeEvents       chan resizeEvent
 	stream             *terminalStream
 	minCols            int
@@ -444,11 +456,21 @@ func (sm *SessionManager) broadcastTerminalState(reason string) {
 }
 
 func (sm *SessionManager) terminalStateMessageLocked(reason string) []byte {
-	state := terminalState{ActiveCols: sm.activeCols, ActiveRows: sm.activeRows,
-		Policy: sm.resizePolicy, LeaderClient: sm.leaderClientID, Reason: reason,
-		SourceClient: sm.lastResizeSource, Connected: len(sm.clients), ResizeEnabled: sm.resizePolicy != "fixed", SizeControl: sm.resizePolicy == "leader"}
+	state := sm.terminalStateLocked(reason, time.Now())
 	data, _ := json.Marshal(state)
 	return append([]byte{'8'}, data...)
+}
+
+func (sm *SessionManager) terminalStateLocked(reason string, now time.Time) terminalState {
+	state := terminalState{ActiveCols: sm.activeCols, ActiveRows: sm.activeRows,
+		Policy: sm.resizePolicy, LeaderClient: sm.leaderClientID, Reason: reason,
+		SourceClient: sm.lastResizeSource, Connected: len(sm.clients), ResizeEnabled: sm.resizePolicy != "fixed", SizeControl: sm.resizePolicy == "leader",
+		ControlReason: sm.controlReason, ResizeReason: sm.lastResizeReason}
+	if size, ok := sm.clientSizes[sm.leaderClientID]; ok {
+		state.LeaderDevice = size.DeviceClass
+		state.LeaderVisible = size.Visible && sm.leaderConnectedLocked() && (sm.resizePolicy != "adaptive" || size.fresh(now))
+	}
+	return state
 }
 
 func (sm *SessionManager) GetClientCount() int {

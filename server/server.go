@@ -431,6 +431,7 @@ func (server *Server) setupHandlers(ctx context.Context, gracefullCtx context.Co
 		})
 	}
 	wsMux.HandleFunc(pathPrefix+"-/restart", server.generateHandleSelfRestart(cancel))
+	wsMux.HandleFunc(pathPrefix+"-/terminal-state", server.handleTerminalGeometry)
 	wsMux.HandleFunc(pathPrefix+"ws", server.generateHandleWS(ctx, gracefullCtx, cancel, counter))
 	wsMux.HandleFunc(pathPrefix+"asr/ws", server.generateHandleASRWS(ctx, gracefullCtx))
 	if server.options.ShareEnabled {

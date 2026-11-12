@@ -232,8 +232,7 @@ credential = "user:pass"
 enable_reconnect = true
 history_replay_bytes = 524288
 history_lines = 5000
-resize_policy = "leader"
-leader_select = "first"
+resize_policy = "adaptive"
 leader_grace_ms = 5000
 restart_mode = "exec"
 
@@ -247,7 +246,7 @@ preferences {
 }
 ```
 
-多客户端默认共用当前控制客户端的终端网格，新连接不抢占尺寸；刷新通过服务端状态快照恢复保留历史和 Vim 屏幕。策略、保留上限及兼容性见 [终端恢复说明](docs/terminal-recovery.md)。
+多客户端共用一套终端网格，默认自动优先可见桌面端；手机先连接后，电脑能够自动恢复大网格，手机刷新不会缩小正在使用的桌面终端。隐藏控制端会让权，刷新保留 5 秒宽限；显式配置的 leader/fixed/median 保持兼容。刷新通过服务端状态快照恢复保留历史和 Vim 屏幕。策略、尺寸诊断及保留上限见 [终端恢复说明](docs/terminal-recovery.md)。
 
 ## 关键配置
 

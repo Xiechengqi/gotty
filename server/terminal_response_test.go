@@ -58,3 +58,18 @@ func TestOnlySizeOwnerAnswersSharedTerminalQueries(t *testing.T) {
 		t.Fatal("query responder stole the size lease")
 	}
 }
+
+func TestAdaptiveExpiredOwnerCannotDuplicateTerminalReplies(t *testing.T) {
+	sm, _ := adaptiveManager(t)
+	owner := addResizeClient(sm, "owner", "owner-browser-key", false)
+	viewer := addResizeClient(sm, "viewer", "viewer-browser-key", false)
+	sm.setLeaderLocked(owner)
+	sm.clientSizes[owner.id] = resizeDimensions{Columns: 160, Rows: 45, Visible: true, Presence: true, UpdatedAt: time.Now().Add(-time.Minute)}
+	sm.clientSizes[viewer.id] = resizeDimensions{Columns: 60, Rows: 20, Visible: true, Presence: true, UpdatedAt: time.Now()}
+	if sm.acceptsTerminalResponseLocked(owner) || !sm.acceptsTerminalResponseLocked(viewer) {
+		t.Fatal("expired owner blocked or duplicated terminal replies")
+	}
+	if sm.leaderClientID != owner.id {
+		t.Fatal("query response unexpectedly changed geometry ownership")
+	}
+}

@@ -226,8 +226,7 @@ credential = "user:pass"
 enable_reconnect = true
 history_replay_bytes = 524288
 history_lines = 5000
-resize_policy = "leader"
-leader_select = "first"
+resize_policy = "adaptive"
 leader_grace_ms = 5000
 restart_mode = "exec"
 
@@ -241,7 +240,7 @@ preferences {
 }
 ```
 
-Clients share the current size owner's terminal grid by default; a new connection does not preempt it. Reloading restores retained history and Vim screen state from a server checkpoint. See [terminal recovery](docs/terminal-recovery.md) for policies, limits, and compatibility.
+Clients share one terminal grid. The default adaptive policy prefers visible desktop clients, including when a phone connected first; phone reloads do not shrink an active desktop terminal. Hidden controllers yield and reloads retain a five-second grace period. Explicit leader/fixed/median configurations remain supported. Reloading restores retained history and Vim screen state from a server checkpoint. See [terminal recovery](docs/terminal-recovery.md) for policies, limits, and compatibility.
 
 ## Key Settings
 

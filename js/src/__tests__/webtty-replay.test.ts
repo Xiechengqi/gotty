@@ -2,7 +2,7 @@ import {afterEach, expect, it, vi} from 'vitest';
 import {WebTTY, type Terminal, type Connection} from '../webtty';
 
 const stops: (() => void)[] = [];
-afterEach(() => {stops.splice(0).forEach(stop => stop()); vi.useRealTimers();});
+afterEach(() => {stops.splice(0).forEach(stop => stop()); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals();});
 function setup(scope = 'recovery-test') {
   vi.useFakeTimers();
   Object.defineProperty(document, 'hidden', {configurable: true, value: false});
@@ -90,4 +90,33 @@ it('stores only a stable browser identity and scopes it to the terminal', () => 
   const key = (p: ReturnType<typeof setup>) => {p.wt.reconnectNow(); return JSON.parse(p.sockets.at(-1)!.send.mock.calls[0][0]).ClientKey;};
   expect(key(a)).toBe(key(b)); expect(key(a)).not.toBe(key(c));
   expect(Object.values(sessionStorage).every(value => /^[a-f0-9]{32}$/.test(value))).toBe(true);
+});
+
+it('renews adaptive presence without treating blur as hidden or renewing hidden panes', () => {
+  const p = setup();
+  let visible = true;
+  p.terminal.isVisible = () => visible;
+  p.receive('8' + JSON.stringify({policy: 'adaptive', activeCols: 80, activeRows: 24}));
+  const requests = () => p.sockets[0].send.mock.calls.filter(([frame]) => frame[0] === '3').map(([frame]) => JSON.parse(frame.slice(1)));
+  window.dispatchEvent(new Event('blur')); vi.advanceTimersByTime(3000);
+  expect(requests()).toHaveLength(1); expect(requests()[0]).toMatchObject({presence: true, visible: true, takeControl: false});
+  visible = false; p.wt.reportVisibility(); vi.advanceTimersByTime(6000);
+  expect(requests()).toHaveLength(2); expect(requests()[1].visible).toBe(false);
+  visible = true; p.wt.reportVisibility();
+  expect(requests().at(-1).visible).toBe(true);
+  stops.pop()!(); const count = p.sockets[0].send.mock.calls.length;
+  vi.advanceTimersByTime(6000); expect(p.sockets[0].send.mock.calls).toHaveLength(count);
+});
+
+it('keeps legacy servers event-driven and classifies a landscape touch screen as mobile', () => {
+  vi.stubGlobal('matchMedia', vi.fn((query:string)=>({matches:query==='(pointer: coarse)'})));
+  vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(900);
+  vi.spyOn(window, 'innerHeight', 'get').mockReturnValue(400);
+  const p = setup();
+  p.receive('8' + JSON.stringify({policy:'leader',activeCols:80,activeRows:24}));
+  vi.advanceTimersByTime(6000);
+  expect(p.sockets[0].send.mock.calls.filter(([frame])=>frame[0]==='3')).toHaveLength(0);
+  p.wt.reportVisibility();
+  const frame=p.sockets[0].send.mock.calls.find(([frame])=>frame[0]==='3')![0];
+  expect(JSON.parse(frame.slice(1))).toMatchObject({inputClass:'coarse',deviceClass:'mobile',viewportWidth:900});
 });

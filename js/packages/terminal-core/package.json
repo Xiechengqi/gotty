@@ -1,6 +1,6 @@
 {
   "name": "@gotty/terminal-core",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "private": false,
   "type": "module",
   "main": "webtty.ts",
@@ -8,6 +8,7 @@
   "files": [
     "webtty.ts",
     "paste.ts",
+    "geometry.ts",
     "LICENSE",
     "voice-input.ts",
     "appearance.ts",
@@ -25,6 +26,7 @@
   "exports": {
     ".": "./webtty.ts",
     "./paste": "./paste.ts",
+    "./geometry": "./geometry.ts",
     "./voice-input": "./voice-input.ts",
     "./appearance": "./appearance.ts",
     "./key-encoder": "./key-encoder.ts",

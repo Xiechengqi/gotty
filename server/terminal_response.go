@@ -54,9 +54,9 @@ func (sm *SessionManager) handleTerminalResponse(client *Client, data []byte) bo
 }
 
 func (sm *SessionManager) acceptsTerminalResponseLocked(client *Client) bool {
-	if sm.resizePolicy == "leader" {
+	if sm.resizePolicy == "leader" || sm.resizePolicy == "adaptive" {
 		for c := range sm.clients {
-			if c.id == sm.leaderClientID && sm.eligibleLocked(c) {
+			if c.id == sm.leaderClientID && sm.eligibleLocked(c) && (sm.resizePolicy != "adaptive" || sm.clientSizes[c.id].fresh(time.Now())) {
 				return c == client
 			}
 		}
@@ -66,7 +66,7 @@ func (sm *SessionManager) acceptsTerminalResponseLocked(client *Client) bool {
 	// hidden. This does not change the PTY size or steal its ownership lease.
 	var selected *Client
 	for c := range sm.clients {
-		if !sm.eligibleLocked(c) {
+		if !sm.eligibleLocked(c) || (sm.resizePolicy == "adaptive" && !sm.clientSizes[c.id].fresh(time.Now())) {
 			continue
 		}
 		if selected == nil || sm.clientOrder[c.id] < sm.clientOrder[selected.id] {

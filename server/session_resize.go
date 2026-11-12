@@ -105,8 +105,29 @@ func (sm *SessionManager) handleResizeEvent(client *Client, req clientResizeRequ
 		return
 	}
 	visible := req.Visible == nil || *req.Visible
-	sm.clientSizes[client.id] = resizeDimensions{Columns: clamp(req.Columns, sm.minCols, sm.maxCols), Rows: clamp(req.Rows, sm.minRows, sm.maxRows),
-		DeviceClass: req.DeviceClass, PixelRatio: req.PixelRatio, ViewportWidth: req.ViewportWidth, ViewportHeight: req.ViewportHeight, UpdatedAt: now, Visible: visible}
+	previous := sm.clientSizes[client.id]
+	size := resizeDimensions{Columns: clamp(req.Columns, sm.minCols, sm.maxCols), Rows: clamp(req.Rows, sm.minRows, sm.maxRows),
+		DeviceClass: geometryDevice(req.DeviceClass), InputClass: geometryInput(req.InputClass), Presence: req.Presence,
+		PixelRatio: req.PixelRatio, ViewportWidth: req.ViewportWidth, ViewportHeight: req.ViewportHeight, UpdatedAt: now, Visible: visible,
+		HiddenSince: previous.HiddenSince, StableSince: previous.StableSince}
+	changed := size.Columns != previous.Columns || size.Rows != previous.Rows || size.priority() != previous.priority()
+	if changed || size.StableSince.IsZero() || visible != previous.Visible {
+		size.StableSince = now
+	}
+	if visible {
+		size.HiddenSince = time.Time{}
+	} else if previous.Visible || size.HiddenSince.IsZero() {
+		size.HiddenSince = now
+	}
+	sm.clientSizes[client.id] = size
+	if sm.resizePolicy == "adaptive" {
+		// Presence renewals must not postpone a pending resize or generate events.
+		if visible && client.id == sm.leaderClientID && (size.Columns != sm.activeCols || size.Rows != sm.activeRows) && (changed || sm.resizeDue.IsZero()) {
+			sm.resizeDue = now.Add(sm.resizeDebounce)
+		}
+		sm.reconcileAdaptiveLocked(now)
+		return
+	}
 	if !visible {
 		if sm.resizePolicy == "median" {
 			sm.resizeDue = now.Add(sm.resizeDebounce)
@@ -146,6 +167,9 @@ func (sm *SessionManager) handleResizeEvent(client *Client, req clientResizeRequ
 func (sm *SessionManager) flushResize(now time.Time) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
+	if sm.resizePolicy == "adaptive" {
+		sm.reconcileAdaptiveLocked(now)
+	}
 	if sm.resizeDue.IsZero() || now.Before(sm.resizeDue) {
 		return
 	}
@@ -165,9 +189,9 @@ func (sm *SessionManager) applyResizeLocked(now time.Time) {
 	switch sm.resizePolicy {
 	case "fixed":
 		cols, rows = sm.configuredCols, sm.configuredRows
-	case "leader":
+	case "leader", "adaptive":
 		size, ok := sm.clientSizes[sm.leaderClientID]
-		if !ok || !size.Visible || !sm.leaderConnectedLocked() {
+		if !ok || !size.Visible || !sm.leaderConnectedLocked() || (sm.resizePolicy == "adaptive" && !size.fresh(now)) {
 			return
 		}
 		cols, rows, source = size.Columns, size.Rows, sm.leaderClientID
@@ -197,6 +221,7 @@ func (sm *SessionManager) applyResizeLocked(now time.Time) {
 		return
 	}
 	sm.activeCols, sm.activeRows, sm.lastResizeAt, sm.lastResizeSource = cols, rows, now, source
+	sm.lastResizeReason = "client-resize"
 	if sm.stream != nil {
 		sm.stream.Resize(cols, rows)
 	}

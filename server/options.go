@@ -34,7 +34,7 @@ type Options struct {
 	PassHeaders         bool   `hcl:"pass_headers" flagName:"pass-headers" flagDescribe:"Pass HTTP request headers as environment variables (e.g. Cookie becomes HTTP_COOKIE)" default:"false"`
 	Width               int    `hcl:"width" flagName:"width" flagDescribe:"Static width of the screen, 0(default) means dynamically resize" default:"0"`
 	Height              int    `hcl:"height" flagName:"height" flagDescribe:"Static height of the screen, 0(default) means dynamically resize" default:"0"`
-	ResizePolicy        string `hcl:"resize_policy" flagName:"resize-policy" flagDescribe:"Terminal resize policy: fixed, leader, or median" default:"leader"`
+	ResizePolicy        string `hcl:"resize_policy" flagName:"resize-policy" flagDescribe:"Terminal resize policy: adaptive (visible desktop preferred), fixed, leader, or median" default:"adaptive"`
 	MinCols             int    `hcl:"min_cols" flagName:"min-cols" flagDescribe:"Minimum terminal columns when resizing dynamically" default:"60"`
 	MaxCols             int    `hcl:"max_cols" flagName:"max-cols" flagDescribe:"Maximum terminal columns when resizing dynamically" default:"240"`
 	MinRows             int    `hcl:"min_rows" flagName:"min-rows" flagDescribe:"Minimum terminal rows when resizing dynamically" default:"20"`
@@ -154,9 +154,9 @@ func (options *Options) Validate() error {
 		return errors.New("history-replay-bytes must be >= 0")
 	}
 	switch options.ResizePolicy {
-	case "fixed", "leader", "median":
+	case "adaptive", "fixed", "leader", "median":
 	default:
-		return errors.New("resize-policy must be one of: fixed, leader, median")
+		return errors.New("resize-policy must be one of: adaptive, fixed, leader, median")
 	}
 	switch options.LeaderSwitch {
 	case "never", "on_disconnect", "on_idle":

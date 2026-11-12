@@ -6,6 +6,7 @@ import { WebglAddon } from '@xterm/addon-webgl';
 import { ImageAddon } from '@xterm/addon-image';
 import { ZModemAddon } from "./zmodem";
 import { TerminalStatePayload } from "./webtty";
+import { describeGeometry } from '../packages/terminal-core/geometry';
 import {bindPaste, type PasteState} from '../packages/terminal-core/paste';
 import {PasteProgress} from './paste-progress';
 import { defaultDisplayOptions, terminalPreferences } from "../packages/terminal-core/appearance";
@@ -312,6 +313,7 @@ export class GoTTYXterm {
     resizeListener: () => void;
     private requestedSize?: {cols:number;rows:number};
     private serverSize?: {cols:number;rows:number};
+    private geometryState?: TerminalStatePayload;
     private resizeCallback?: (cols:number,rows:number)=>void;
     private sizeControlSender?: ()=>void;
     private sizeControlBtn?: HTMLButtonElement;
@@ -852,6 +854,7 @@ export class GoTTYXterm {
         }
         const grid = this.serverSize || size;
         this.term.resize(grid.cols,grid.rows);
+        this.updateGeometryHint();
     }
 
     info(): { columns: number, rows: number } {
@@ -1001,11 +1004,13 @@ export class GoTTYXterm {
     };
 
     updateTerminalState(state: TerminalStatePayload) {
+        this.geometryState = state;
         const cols=state.activeCols, rows=state.activeRows;
         if (Number.isInteger(cols) && cols>0 && cols<=4096 && Number.isInteger(rows) && rows>0 && rows<=4096) {
             this.serverSize={cols,rows}; this.term.resize(cols,rows);
         }
         if (this.sizeControlBtn && state.reason !== 'snapshot') this.sizeControlBtn.disabled = state.sizeControl !== true;
+        this.updateGeometryHint();
         if (!this.terminalStateElem) {
             return;
         }
@@ -1013,6 +1018,10 @@ export class GoTTYXterm {
         const size = `${state.activeCols}x${state.activeRows}`;
         this.terminalStateElem.textContent = `Size: ${size} | Policy: ${state.policy} | leader: ${leader}`;
     };
+
+    private updateGeometryHint(): void {
+        this.connectionCountElem.title = 'Connections\n' + describeGeometry(this.geometryState, this.info());
+    }
 
     showAPIIndicator(execId: string) {
         if (this.apiIndicatorElem) {

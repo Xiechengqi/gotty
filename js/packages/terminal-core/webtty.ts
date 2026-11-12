@@ -118,6 +118,10 @@ export interface TerminalStatePayload {
     connectedClients: number;
     resizeEnabled: boolean;
     sizeControl?: boolean;
+    leaderDevice?: string;
+    leaderVisible?: boolean;
+    controlReason?: string;
+    resizeReason?: string;
 }
 
 export interface Connection {
@@ -197,6 +201,7 @@ export class WebTTY {
     skipNextOutputOffset: boolean;
     private replayGeneration = 0;
     private inputSender: InputSender;
+    private adaptivePresence = false;
 
     /*
      * The server's buffer size. If a single message exceeds this size, it will
@@ -261,11 +266,18 @@ export class WebTTY {
         window.addEventListener("pageshow", onPageShow);
         window.addEventListener("online", onOnline);
 
+        // Only adaptive servers opt in. Legacy leader/on_idle clients keep
+        // their event-driven resize behavior. Focus changes are not visibility.
+        const presence = setInterval(() => {
+            if (this.adaptivePresence && !document.hidden && (this.term.isVisible?.() ?? true)) this.reportVisibility();
+        }, 3000);
+
         this.connectNow(true);
 
         return () => {
             this.stopped = true;
             this.inputSender.dispose();
+            clearInterval(presence);
             this.onDisconnect?.();
             document.removeEventListener("visibilitychange", onVisibilityChange);
             window.removeEventListener("pageshow", onPageShow);
@@ -548,6 +560,7 @@ export class WebTTY {
                 break;
             case msgTerminalState:
                 const state = JSON.parse(payload) as TerminalStatePayload;
+                this.adaptivePresence = state.policy === 'adaptive';
                 if (this.term.updateTerminalState) {
                     this.term.updateTerminalState(state);
                 }
@@ -790,7 +803,9 @@ export class WebTTY {
         }, this.resizeDebounceMs);
     }
 
-    private getDeviceClass(viewportWidth: number): string {
+    private getDeviceClass(viewportWidth: number, inputClass: string): string {
+        if (inputClass === 'fine') return 'desktop';
+        if (inputClass === 'coarse') return Math.min(viewportWidth, window.innerHeight) < 640 ? 'mobile' : 'tablet';
         if (viewportWidth < 640) return "mobile";
         if (viewportWidth < 1024) return "tablet";
         return "desktop";
@@ -799,6 +814,8 @@ export class WebTTY {
     private sendResizeTerminal(colmuns: number, rows: number, takeControl = false) {
         const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 0;
         const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
+        const inputClass = window.matchMedia?.('(any-pointer: fine) and (any-hover: hover)').matches ? 'fine'
+            : window.matchMedia?.('(pointer: coarse)').matches ? 'coarse' : 'unknown';
         this.sendIfOpen(
             msgResizeTerminal + JSON.stringify(
                 {
@@ -806,7 +823,9 @@ export class WebTTY {
                     visible: !document.hidden && (this.term.isVisible?.() ?? true),
                     takeControl,
                     rows: rows,
-                    deviceClass: this.getDeviceClass(viewportWidth),
+                    deviceClass: this.getDeviceClass(viewportWidth, inputClass),
+                    inputClass,
+                    presence: true,
                     pixelRatio: window.devicePixelRatio || 1,
                     viewportWidth: viewportWidth,
                     viewportHeight: viewportHeight

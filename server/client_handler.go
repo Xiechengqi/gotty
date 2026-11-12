@@ -13,6 +13,8 @@ type clientResizeRequest struct {
 	Columns        int     `json:"columns"`
 	Rows           int     `json:"rows"`
 	DeviceClass    string  `json:"deviceClass"`
+	InputClass     string  `json:"inputClass,omitempty"`
+	Presence       bool    `json:"presence,omitempty"`
 	PixelRatio     float64 `json:"pixelRatio"`
 	ViewportWidth  int     `json:"viewportWidth"`
 	ViewportHeight int     `json:"viewportHeight"`
