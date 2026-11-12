@@ -30,19 +30,9 @@ jobs:
           test -z "$(gofmt -l $(git ls-files '*.go'))"
           go vet ./...
           go test -race ./...
-      - run: make typecheck test-js
+      # UI/component/browser tests run outside GitHub Actions; see ../AGENTS.md.
+      - run: make typecheck
       - name: Build frontend and verify committed assets
         run: |
           make assets
           ./scripts/check-frontend-assets.sh
-      - name: Install browser and transfer tools
-        run: |
-          cd js && npx playwright install --with-deps chromium
-          sudo apt-get update
-          sudo apt-get install -y lrzsz
-      - run: make test-e2e
-      - uses: actions/upload-artifact@v7
-        if: failure()
-        with:
-          name: playwright-artifacts
-          path: js/test-results/

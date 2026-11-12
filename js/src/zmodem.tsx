@@ -48,10 +48,12 @@ export class ZModemAddon implements ITerminalAddon {
     private init() {
         render(<></>, this.elem);
 
+        // zmodem.js emits number[]; xterm and the input queue require typed
+        // bytes. Normalize at the library boundary without text re-encoding.
         this.sentry = new Sentry({
-            'to_terminal': (d: Uint8Array) => this.toTerminal(d),
+            'to_terminal': (d) => this.toTerminal(new Uint8Array(d)),
             'on_detect': (detection: Detection) => this.onDetect(detection),
-            'sender': (x: Uint8Array) => { this.toServer(x) },
+            'sender': (x) => { this.toServer(new Uint8Array(x)) },
             'on_retract': () => this.reset(),
         });
     }

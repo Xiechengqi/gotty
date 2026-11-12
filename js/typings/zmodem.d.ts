@@ -7,9 +7,10 @@ declare module 'zmodem.js' {
     }
 
     export interface SentryOptions {
-        to_terminal: (data: Uint8Array) => void;
+        // The library callbacks emit ordinary arrays of byte values.
+        to_terminal: (data: number[]) => void;
         on_detect: (detection: Detection) => void;
-        sender: (data: Uint8Array) => void;
+        sender: (data: number[]) => void;
         on_retract: () => void;
     }
 

@@ -370,6 +370,8 @@ make test-e2e
 
 前端构建使用 esbuild 转译，类型检查由 TypeScript 7 独立执行，两者都需要通过。提交前端源码或依赖变更时，同时提交 `make assets` 生成的 JS、sourcemap 和许可清单。CI 检查整个 `bindata/static` 目录及 xterm 许可条目。
 
+GitHub Actions 不运行 UI 测试，包括前端组件测试及 Playwright 浏览器测试，也不得新增这类步骤。`make test-js`、`make test-e2e` 仅用于 Actions 之外经授权的隔离测试环境，不得针对正在运行的 GoTTY 实例执行。CI 保留类型检查、资源构建与一致性检查、Go 检查及后端测试。
+
 `./scripts/build-linux.sh` 构建 Linux amd64/arm64，并为每个目标嵌入对应的 `http-tunnel-client`；也可指定单个架构。脚本退出时恢复本地原有嵌入文件。`make cross_compile` 使用相同流程；其余平台可自行使用 Go 构建，但没有配套的内嵌隧道客户端发布产物。
 
 Docker 使用 Node.js 24 在构建平台生成前端，Go 按目标架构编译，运行镜像固定为 Alpine 3.24。官方工作流仅发布 Linux amd64/arm64。隧道客户端下载仍跟随其 `latest` 发布，因此完整发布复现还需要固定该外部产物。自动发布及手动发布均先运行统一验证流程。
