@@ -31,6 +31,7 @@ type Client struct {
 	key             string
 	lastActivity    time.Time
 	cursorQuerySeen [2]int64
+	upload          *clientFileUpload // Protected by SessionManager.mu.
 }
 
 type replaySnapshot struct {
@@ -79,6 +80,8 @@ type SessionManager struct {
 	history     *HistoryBuffer
 	lineHistory *LineBuffer
 	mu          sync.RWMutex
+	paste       *clientPaste // Protected by mu; never hold mu during PTY writes.
+	userWrites  int
 	ctx         context.Context
 	generation  int64
 
@@ -168,6 +171,9 @@ func (sm *SessionManager) ReplaceSlave(newSlave Slave) (oldSlave Slave, generati
 	defer sm.mu.Unlock()
 
 	oldSlave = sm.slave
+	if sm.paste != nil {
+		sm.paste.cancel()
+	}
 	sm.slave = newSlave
 	sm.generation++
 	generation = sm.generation
@@ -211,6 +217,9 @@ func (sm *SessionManager) CloseSlave() error {
 }
 
 func (sm *SessionManager) cleanupUploadLocked() {
+	for client := range sm.clients {
+		client.cleanupFileUpload()
+	}
 	if sm.uploadFile != nil {
 		if f, ok := sm.uploadFile.(*os.File); ok {
 			f.Close()
@@ -247,6 +256,14 @@ func (sm *SessionManager) InitializeTerminal() error {
 }
 
 func (sm *SessionManager) Run() {
+	defer func() {
+		sm.mu.Lock()
+		defer sm.mu.Unlock()
+		if sm.paste != nil {
+			sm.paste.cancel()
+		}
+		sm.cleanupUploadLocked()
+	}()
 	ticker := time.NewTicker(25 * time.Millisecond)
 	defer ticker.Stop()
 	if sm.stream != nil {
@@ -341,6 +358,10 @@ func (sm *SessionManager) removeClientLocked(client *Client, now time.Time) bool
 	delete(sm.clients, client)
 	delete(sm.clientOrder, client.id)
 	delete(sm.clientSizes, client.id)
+	client.cleanupFileUpload()
+	if sm.paste != nil && sm.paste.client == client {
+		sm.paste.cancel()
+	}
 	close(client.send)
 	if client.id == sm.leaderClientID {
 		if client.key != "" {
@@ -462,6 +483,8 @@ func clamp(value, min, max int) int {
 
 // UploadFileMessage represents a file upload message from the client
 type UploadFileMessage struct {
+	UploadID    string `json:"uploadId,omitempty"`
+	Cancel      bool   `json:"cancel,omitempty"`
 	Name        string `json:"name"`
 	Size        int    `json:"size"`
 	Chunk       int    `json:"chunk"`

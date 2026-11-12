@@ -1,3 +1,4 @@
+import {InputSender, type PasteReply, type PasteState} from './paste';
 export const protocols = ["webtty"];
 
 export const msgInputUnknown = '0';
@@ -81,6 +82,8 @@ export interface Terminal {
      * Sets an input (e.g. user types something) handler
      */
     onInput(callback: (input: string | Uint8Array) => void): void;
+    setPasteSender?(sender: (text: string, bracketed: boolean) => void): void;
+    onPasteProgress?(state: PasteState | undefined, cancel: () => void, dismiss: () => void): void;
 
     /*
      * Sets a resize handler
@@ -124,7 +127,8 @@ export interface Connection {
     /*
      * This takes fucking strings??
      */
-    send(s: string): void;
+    send(s: string): void | boolean;
+    bufferedAmount?(): number;
 
     isOpen(): boolean;
     readyState(): number;
@@ -192,6 +196,7 @@ export class WebTTY {
     private initialized = false;
     skipNextOutputOffset: boolean;
     private replayGeneration = 0;
+    private inputSender: InputSender;
 
     /*
      * The server's buffer size. If a single message exceeds this size, it will
@@ -208,6 +213,13 @@ export class WebTTY {
     constructor(term: Terminal, connectionFactory: ConnectionFactory, args: string, authToken: string, identityScope = location.pathname) {
         this.clientKey = terminalClientKey(identityScope);
         this.term = term;
+        this.inputSender = new InputSender({
+            send: frame => this.sendIfOpen(frame),
+            buffered: () => this.connection?.bufferedAmount?.() ?? 0,
+            chunkSize: () => Math.max(4, Math.floor((this.bufSize - 1) / 4) * 3),
+            changed: state => this.term.onPasteProgress?.(state, () => this.inputSender.cancel(), () => this.inputSender.dismiss()),
+            message: text => this.term.showMessage(text, 6000),
+        });
         this.connectionFactory = connectionFactory;
         this.args = args;
         this.authToken = authToken;
@@ -253,6 +265,7 @@ export class WebTTY {
 
         return () => {
             this.stopped = true;
+            this.inputSender.dispose();
             this.onDisconnect?.();
             document.removeEventListener("visibilitychange", onVisibilityChange);
             window.removeEventListener("pageshow", onPageShow);
@@ -333,6 +346,9 @@ export class WebTTY {
                 this.term.onInput((input: string | Uint8Array) => {
                     this.sendInput(input);
                 });
+                this.term.setPasteSender?.((text, bracketed) => {
+                    if (!this.replayActive && !this.stopped && this.initialized) this.inputSender.paste(text, bracketed);
+                });
 
                 this.term.setSizeControlSender?.(() => this.takeSizeControl());
                 if ('setUploadFileSender' in this.term) {
@@ -365,6 +381,7 @@ export class WebTTY {
             this.clearProbeTimer();
             this.connection = null;
             this.initialized = false;
+            this.inputSender.disconnect();
             if (this.replayActive && this.replayMode !== "events" && this.replayMode !== "resume") this.snapshotRequired = true;
             this.term.deactivate();
             this.onDisconnect?.();
@@ -391,6 +408,7 @@ export class WebTTY {
 
     reconnectNow(): void {
         if (this.stopped) return;
+        this.inputSender.disconnect();
         if (this.replayActive && this.replayMode !== 'events' && this.replayMode !== 'resume') this.snapshotRequired = true;
         const old = this.connection;
         this.connection = null;
@@ -424,6 +442,16 @@ export class WebTTY {
     }
 
     private receiveMessage(data: string): void {
+        // Receipts must not wait for the output renderer; a busy renderer must
+        // not stall paste flow control or its cancellation response.
+        if (data[0] === 'e') {
+            try {
+                const reply = JSON.parse(data.slice(1)) as PasteReply;
+                if (!reply.id && reply.error) this.term.showMessage(reply.error, 6000);
+                else this.inputSender.reply(reply);
+            } catch { /* Invalid receipts time out, never imply success. */ }
+            return;
+        }
         let sequence: number | undefined;
         try {
             if (data[0] === msgReplayBegin) {
@@ -495,6 +523,7 @@ export class WebTTY {
                 break;
             case msgSetPreferences:
                 const preferences = JSON.parse(payload);
+                this.inputSender.acknowledged = preferences['paste-protocol'] === 1;
                 this.term.setPreferences(preferences);
                 if (typeof preferences.reconnect === "number") {
                     this.applyReconnectHint(preferences.reconnect);
@@ -712,8 +741,7 @@ export class WebTTY {
             return false;
         }
         try {
-            this.connection.send(data);
-            return true;
+            return this.connection.send(data) !== false;
         } catch (err) {
             console.warn("[GoTTY] websocket send failed:", err);
             return false;
@@ -727,22 +755,7 @@ export class WebTTY {
     private sendInput(input: string | Uint8Array) {
         // Historical queries must never send replies into the current PTY.
         if (this.replayActive || this.stopped) return;
-        let effectiveBufferSize = this.bufSize - 1;
-        let dataString: string;
-
-        if (typeof input === "string") {
-            dataString = Array.from(new TextEncoder().encode(input), byte => String.fromCharCode(byte)).join('');
-        } else {
-            dataString = String.fromCharCode(...input)
-        }
-
-        // Account for base64 encoding
-        let maxChunkSize = Math.floor(effectiveBufferSize / 4) * 3;
-
-        for (let i = 0; i < Math.ceil(dataString.length / maxChunkSize); i++) {
-            let inputChunk = dataString.substring(i * maxChunkSize, Math.min((i + 1) * maxChunkSize, dataString.length))
-            this.sendIfOpen(msgInput + btoa(inputChunk));
-        }
+        this.inputSender.input(input);
     }
 
     private sendUploadFile(msg: string) {

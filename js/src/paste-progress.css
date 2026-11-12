@@ -1,0 +1,9 @@
+.gotty-paste-layer{position:fixed;z-index:1040;display:flex;align-items:center;justify-content:center;padding:16px;pointer-events:none;box-sizing:border-box}
+.gotty-paste-card{display:flex;flex-direction:column;gap:12px;inline-size:360px;max-inline-size:100%;padding:16px;border:1px solid var(--bs-border-color);border-radius:16px;background:var(--bs-body-bg);color:var(--bs-body-color);box-shadow:var(--bs-box-shadow);font:14px/1.5 system-ui,sans-serif;pointer-events:auto}
+.gotty-paste-heading{display:flex;gap:16px;align-items:center;justify-content:space-between}
+.gotty-paste-heading bdi{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-inline-size:0}
+.gotty-paste-heading button{flex-shrink:0}
+.gotty-paste-card progress{appearance:none;display:block;inline-size:100%;block-size:8px;border:0;border-radius:8px;overflow:hidden;background:var(--bs-secondary-bg);color:var(--bs-primary)}
+.gotty-paste-card progress::-webkit-progress-bar{background:var(--bs-secondary-bg)}
+.gotty-paste-card progress::-webkit-progress-value{background:var(--bs-primary)}
+.gotty-paste-card progress::-moz-progress-bar{background:var(--bs-primary)}

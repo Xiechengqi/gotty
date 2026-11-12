@@ -10,6 +10,9 @@ import (
 func (h *hubManager) terminalPreferences(client *Client) map[string]any {
 	prefs := h.server.buildPreferences()
 	prefs["client-id"] = client.id
+	if h.server.sessionManager.pasteSupported() {
+		prefs["paste-protocol"] = 1
+	}
 	if h.server.options.EnableReconnect {
 		prefs["reconnect"] = h.server.options.ReconnectTime
 	}
@@ -20,6 +23,7 @@ func (h *hubManager) terminalPreferences(client *Client) map[string]any {
 		"asr_hold_ms":         opts.ASRHoldMs, "asr_hotkey": opts.ASRHotkey,
 		"restart_mode":  effectiveRestartMode(opts.RestartMode),
 		"share_enabled": opts.ShareEnabled && h.server.shareManager != nil,
+		"upload_ack":    true,
 	}
 	return prefs
 }

@@ -37,6 +37,8 @@ type TerminalStatus struct {
 	userIdleTimeout time.Duration
 	stopCh          chan struct{}
 	stopOnce        sync.Once
+	pasteActive     bool
+	inputWrites     int
 }
 
 // NewTerminalStatus creates a new TerminalStatus.
@@ -60,7 +62,7 @@ func (ts *TerminalStatus) idleChecker() {
 			return
 		case <-ticker.C:
 			ts.mu.Lock()
-			if ts.state == StateUserActive && !ts.lastUserInput.IsZero() {
+			if ts.state == StateUserActive && !ts.pasteActive && ts.inputWrites == 0 && !ts.lastUserInput.IsZero() {
 				if time.Since(ts.lastUserInput) > ts.userIdleTimeout {
 					ts.state = StateIdle
 				}
@@ -82,6 +84,9 @@ func (ts *TerminalStatus) Stop() {
 func (ts *TerminalStatus) TryAcquireAPI(execID string) (bool, string) {
 	ts.mu.Lock()
 	defer ts.mu.Unlock()
+	if ts.pasteActive || ts.inputWrites > 0 {
+		return false, "terminal input is in progress"
+	}
 
 	switch ts.state {
 	case StateIdle:
@@ -114,14 +119,15 @@ func (ts *TerminalStatus) ReleaseAPI(execID string) {
 // Returns false if API is executing (writeFn is not called).
 func (ts *TerminalStatus) WriteUserInput(writeFn func()) bool {
 	ts.mu.Lock()
-	if ts.state == StateAPIExecuting {
+	if ts.state == StateAPIExecuting || ts.pasteActive {
 		ts.mu.Unlock()
 		return false
 	}
 	ts.state = StateUserActive
 	ts.lastUserInput = time.Now()
+	ts.inputWrites++
 	ts.mu.Unlock()
-
+	defer func() { ts.mu.Lock(); ts.inputWrites--; ts.mu.Unlock() }()
 	writeFn()
 	return true
 }
@@ -130,14 +136,34 @@ func (ts *TerminalStatus) WriteUserInput(writeFn func()) bool {
 // execution is currently running, without marking the terminal as user-active.
 func (ts *TerminalStatus) WriteAPIInput(writeFn func()) bool {
 	ts.mu.Lock()
-	if ts.state == StateAPIExecuting {
+	if ts.state == StateAPIExecuting || ts.pasteActive {
 		ts.mu.Unlock()
 		return false
 	}
+	ts.inputWrites++
 	ts.mu.Unlock()
-
+	defer func() { ts.mu.Lock(); ts.inputWrites--; ts.mu.Unlock() }()
 	writeFn()
 	return true
+}
+
+// Reserve user activity for the whole paste, including network pauses and
+// cleanup, so the idle checker cannot hand the PTY to an API command midway.
+func (ts *TerminalStatus) beginPaste() (func(), bool) {
+	ts.mu.Lock()
+	defer ts.mu.Unlock()
+	if ts.state == StateAPIExecuting || ts.pasteActive || ts.inputWrites > 0 {
+		return nil, false
+	}
+	ts.pasteActive = true
+	ts.state = StateUserActive
+	ts.lastUserInput = time.Now()
+	return func() {
+		ts.mu.Lock()
+		defer ts.mu.Unlock()
+		ts.pasteActive = false
+		ts.lastUserInput = time.Now()
+	}, true
 }
 
 // GetState returns the current terminal state.

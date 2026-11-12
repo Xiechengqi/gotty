@@ -55,7 +55,7 @@ js/node_modules/@xterm/xterm/css/xterm.css:
 js/packages/terminal-core/themes.ts: server/terminaldata/themes.json scripts/sync-terminal-themes.py
 	python3 scripts/sync-terminal-themes.py
 
-$(TERMINAL_FONT_ASSETS) bindata/static/js/gotty.js.map bindata/static/js/gotty.js bindata/static/js/gotty.licenses.txt bindata/static/js/gotty.js.LICENSE.txt &: js/packages/terminal-core/themes.ts $(TERMINAL_FONT_SOURCES) $(wildcard js/src/*.ts js/src/*.tsx js/src/*.scss js/packages/terminal-core/*.ts js/packages/terminal-core/*.json) js/webpack.config.js js/tsconfig.json js/package-lock.json | js/node_modules/webpack
+$(TERMINAL_FONT_ASSETS) bindata/static/js/gotty.js.map bindata/static/js/gotty.js bindata/static/js/gotty.licenses.txt bindata/static/js/gotty.js.LICENSE.txt &: js/packages/terminal-core/themes.ts $(TERMINAL_FONT_SOURCES) $(wildcard js/src/*.ts js/src/*.tsx js/src/*.scss js/src/*.css js/packages/terminal-core/*.ts js/packages/terminal-core/*.json) js/webpack.config.js js/tsconfig.json js/package-lock.json | js/node_modules/webpack
 	cd js && \
 	npx webpack --mode=$(WEBPACK_MODE)
 

@@ -42,6 +42,7 @@ export class Connection {
     readyState(): number {
         return this.bare.readyState;
     }
+    bufferedAmount(): number { return this.bare.bufferedAmount; }
 
     onOpen(callback: () => void) {
         this.bare.onopen = (event) => {

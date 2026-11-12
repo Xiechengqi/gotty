@@ -6,6 +6,8 @@ import { WebglAddon } from '@xterm/addon-webgl';
 import { ImageAddon } from '@xterm/addon-image';
 import { ZModemAddon } from "./zmodem";
 import { TerminalStatePayload } from "./webtty";
+import {bindPaste, type PasteState} from '../packages/terminal-core/paste';
+import {PasteProgress} from './paste-progress';
 import { defaultDisplayOptions, terminalPreferences } from "../packages/terminal-core/appearance";
 import { render, createRef, Component } from 'preact';
 import { Modal } from 'bootstrap';
@@ -339,6 +341,8 @@ export class GoTTYXterm {
     sendUploadFile?: (msg: string) => void;
     sendRestart?: () => void | Promise<void>;
     private uploadMaxMessageSize = 1024;
+    private pasteProgress?: PasteProgress;
+    private unbindPaste?: () => void;
 
     // Drop overlay and upload modal
     private dropOverlay: DropOverlay | null = null;
@@ -1056,6 +1060,20 @@ export class GoTTYXterm {
         });
     };
 
+    setPasteSender(sender: (text: string, bracketed: boolean) => void): void {
+        this.unbindPaste?.();
+        this.unbindPaste = bindPaste(this.term.element ?? this.elem, () => ({enabled: !this.readOnly && !this.replaying && !this.term.options.disableStdin, bracketed: this.term.modes.bracketedPasteMode && !this.term.options.ignoreBracketedPasteMode}), (text, bracketed) => {
+            this.inputTransformer?.('');
+            this.inputCallbacks.forEach(callback => callback());
+            sender(text, bracketed);
+        });
+    }
+
+    onPasteProgress(state: PasteState | undefined, cancel: () => void, dismiss: () => void): void {
+        if (state?.visible) this.pasteProgress ??= new PasteProgress();
+        this.pasteProgress?.update(state, cancel, dismiss);
+    }
+
     // Set the upload file sender (called from WebTTY)
     setUploadFileSender(sender: (msg: string) => void) {
         if (this.readOnly) {
@@ -1162,6 +1180,7 @@ export class GoTTYXterm {
     }
 
     close(): void {
+        this.unbindPaste?.(); this.pasteProgress?.destroy();
         window.removeEventListener("resize", this.resizeListener);
         window.removeEventListener("orientationchange", this.resizeListener);
         if (window.visualViewport && this.viewportResizeListener) {

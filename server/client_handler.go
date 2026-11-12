@@ -40,6 +40,9 @@ func (server *Server) sendInitMessages(conn *websocket.Conn, client *Client) err
 
 	// Send preferences
 	prefs := map[string]interface{}{}
+	if server.sessionManager.pasteSupported() {
+		prefs["paste-protocol"] = 1
+	}
 	if server.options.EnableReconnect {
 		prefs["reconnect"] = server.options.ReconnectTime
 	}
@@ -61,6 +64,10 @@ func (server *Server) sendInitMessages(conn *websocket.Conn, client *Client) err
 
 func (server *Server) handleClientInput(client *Client, message []byte) {
 	if len(message) == 0 {
+		return
+	}
+	if message[0] == '5' {
+		server.handlePaste(client, message[1:])
 		return
 	}
 
@@ -87,14 +94,25 @@ func (server *Server) handleClientInput(client *Client, message []byte) {
 				if server.sessionManager.handleTerminalResponse(client, decoded[:n]) {
 					return
 				}
-				server.sessionManager.NoteClientActivity(client)
+				sm := server.sessionManager
+				sm.mu.Lock()
+				if sm.paste != nil {
+					sm.pasteReplyLocked(client, pasteResult{Status: "error", Error: "Terminal is busy"})
+					sm.mu.Unlock()
+					return
+				}
+				slave := sm.slave
+				sm.userWrites++
+				sm.mu.Unlock()
+				defer func() { sm.mu.Lock(); sm.userWrites--; sm.mu.Unlock() }()
+				sm.NoteClientActivity(client)
 				if server.terminalStatus != nil {
 					// Atomically check state and update activity; write runs outside lock
 					server.terminalStatus.WriteUserInput(func() {
-						server.sessionManager.slave.Write(decoded[:n])
+						slave.Write(decoded[:n])
 					})
 				} else {
-					server.sessionManager.slave.Write(decoded[:n])
+					slave.Write(decoded[:n])
 				}
 			}
 		}
@@ -114,7 +132,7 @@ func (server *Server) handleClientInput(client *Client, message []byte) {
 			return
 		}
 		if len(message) > 1 {
-			server.sessionManager.HandleFileUpload(message[1:])
+			server.sessionManager.handleClientFileUpload(client, message[1:])
 		}
 	case '9': // Restart terminal process
 		if err := server.restartTerminal(); err != nil {

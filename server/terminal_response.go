@@ -36,6 +36,15 @@ func (sm *SessionManager) handleTerminalResponse(client *Client, data []byte) bo
 		client.cursorQuerySeen[index] = query.sequence
 	}
 	accepted := sm.acceptsTerminalResponseLocked(client)
+	if accepted && sm.paste != nil {
+		select {
+		case sm.paste.replies <- append([]byte(nil), data...):
+		default:
+			sm.paste.cancel()
+		}
+		sm.mu.Unlock()
+		return true
+	}
 	slave := sm.slave
 	sm.mu.Unlock()
 	if accepted {

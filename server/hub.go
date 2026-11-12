@@ -381,7 +381,7 @@ func (h *hubManager) connect(b hubBinding) error {
 			}
 		}
 	}()
-	data, _ := json.Marshal(map[string]any{"protocol": 1, "capabilities": map[string]bool{"write": h.server.options.PermitWrite, "replay": true, "files": h.server.options.PermitWrite, "asr": h.server.options.EnableASR, "controls": true}})
+	data, _ := json.Marshal(map[string]any{"protocol": 1, "capabilities": map[string]bool{"write": h.server.options.PermitWrite, "paste": h.server.sessionManager.pasteSupported(), "replay": true, "files": h.server.options.PermitWrite, "asr": h.server.options.EnableASR, "controls": true}})
 	send(hubFrame{Kind: "hello", Data: data})
 	var first hubFrame
 	c.SetReadDeadline(time.Now().Add(10 * time.Second))
@@ -633,7 +633,7 @@ func (h *hubManager) connect(b hubBinding) error {
 			if len(data) > hubMaxMessage/2 {
 				return errors.New("oversize data")
 			}
-			if len(data) > 0 && strings.ContainsRune("12347", rune(data[0])) {
+			if len(data) > 0 && strings.ContainsRune("123457", rune(data[0])) {
 				h.server.handleClientInput(client, []byte(data))
 			}
 		case "close":
