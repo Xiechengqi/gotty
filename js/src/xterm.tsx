@@ -7,6 +7,7 @@ import { ImageAddon } from '@xterm/addon-image';
 import { ZModemAddon } from "./zmodem";
 import { TerminalStatePayload } from "./webtty";
 import { describeGeometry } from '../packages/terminal-core/geometry';
+import {ViewportFollow} from '../packages/terminal-core/viewport-follow';
 import {bindPaste, type PasteState} from '../packages/terminal-core/paste';
 import {PasteProgress} from './paste-progress';
 import { defaultDisplayOptions, terminalPreferences } from "../packages/terminal-core/appearance";
@@ -364,6 +365,8 @@ export class GoTTYXterm {
     altIsMeta: boolean = false;
     private inputTransformer: ((data: string) => string) | null = null;
     private mobileViewportManaged = false;
+    private viewport?: ViewportFollow;
+    private returnInput?: HTMLButtonElement;
 
     constructor(elem: HTMLElement, preferences: Record<string, unknown> = {}, options: GoTTYXtermOptions = {}) {
         this.elem = elem;
@@ -419,7 +422,7 @@ export class GoTTYXterm {
         this.fitAddOn = new FitAddon();
         this.zmodemAddon = new ZModemAddon({
             toTerminal: (x: Uint8Array) => this.term.write(x),
-            toServer: (x: Uint8Array) => this.sendInput(x)
+            toServer: (x: Uint8Array) => {if (!this.readOnly) this.toServer(x);}
         });
         this.term.loadAddon(new WebLinksAddon());
         this.term.loadAddon(this.fitAddOn);
@@ -556,11 +559,22 @@ export class GoTTYXterm {
         }
 
         this.resizeListener = () => {
+            if (window.visualViewport && !this.updateViewport()) return;
             this.scheduleFit();
         };
 
         this.term.open(elem);
         this.term.textarea?.setAttribute("autocomplete", "off");
+        this.returnInput = elem.ownerDocument.createElement('button');
+        this.returnInput.className = 'btn btn-secondary btn-sm gotty-return-input';
+        this.returnInput.textContent = '↓ Return to input';
+        this.returnInput.hidden = true;
+        // Keep the software keyboard and strip in place between pointerdown
+        // and click; losing focus would move this button before pointerup.
+        this.returnInput.addEventListener('pointerdown', event => event.preventDefault());
+        this.returnInput.addEventListener('click', () => {this.resumeInput(); this.term.focus();});
+        elem.ownerDocument.body.appendChild(this.returnInput);
+        this.viewport = new ViewportFollow(this.term, elem, following => {this.returnInput!.hidden = following;});
 
         try {
             const webgl = new WebglAddon();
@@ -572,6 +586,7 @@ export class GoTTYXterm {
             console.warn("WebGL renderer failed to load, using DOM fallback", e);
         }
 
+        this.updateViewport();
         this.fitTerminal();
         this.term.focus();
 
@@ -582,9 +597,12 @@ export class GoTTYXterm {
         window.addEventListener("orientationchange", this.resizeListener);
         if (window.visualViewport) {
             this.viewportResizeListener = () => {
+                if (!this.updateViewport()) return;
                 if (!this.mobileViewportManaged) this.scheduleFit();
+                this.viewport?.layout();
             };
             window.visualViewport.addEventListener("resize", this.viewportResizeListener);
+            window.visualViewport.addEventListener("scroll", this.viewportResizeListener);
         }
     };
 
@@ -844,6 +862,16 @@ export class GoTTYXterm {
         this.mobileViewportManaged = fn !== null;
     }
 
+    private updateViewport(): boolean {
+        const vv = window.visualViewport;
+        if (!vv || Math.abs(vv.scale - 1) > 0.01) return false;
+        this.elem.style.setProperty('--gotty-viewport-height', `${vv.height}px`);
+        this.elem.style.setProperty('--gotty-viewport-top', `${vv.offsetTop}px`);
+        return true;
+    }
+
+    resumeInput(): void {this.viewport?.userInput();}
+
     private fitTerminal(): void {
         // Fit terminal size to the container so the viewport can reach the bottom.
         const size = this.fitAddOn.proposeDimensions();
@@ -853,7 +881,7 @@ export class GoTTYXterm {
             this.resizeCallback?.(size.cols,size.rows);
         }
         const grid = this.serverSize || size;
-        this.term.resize(grid.cols,grid.rows);
+        this.viewport?.changeLayout(() => this.term.resize(grid.cols,grid.rows));
         this.updateGeometryHint();
     }
 
@@ -875,6 +903,7 @@ export class GoTTYXterm {
 
     setReplayMode(active: boolean) {
         this.replaying = active;
+        this.viewport?.setReplayMode(active);
         this.elem.dataset.replayActive = String(active);
     }
 
@@ -987,6 +1016,7 @@ export class GoTTYXterm {
 
             if (char !== null) {
                 event.preventDefault();
+                this.resumeInput();
                 this.toServer(this.encoder.encode('\x1b' + char));
                 return false;
             }
@@ -1007,7 +1037,7 @@ export class GoTTYXterm {
         this.geometryState = state;
         const cols=state.activeCols, rows=state.activeRows;
         if (Number.isInteger(cols) && cols>0 && cols<=4096 && Number.isInteger(rows) && rows>0 && rows<=4096) {
-            this.serverSize={cols,rows}; this.term.resize(cols,rows);
+            this.serverSize={cols,rows}; this.viewport?.changeLayout(() => this.term.resize(cols,rows));
         }
         if (this.sizeControlBtn && state.reason !== 'snapshot') this.sizeControlBtn.disabled = state.sizeControl !== true;
         this.updateGeometryHint();
@@ -1044,6 +1074,7 @@ export class GoTTYXterm {
         if (this.readOnly) {
             return;
         }
+        this.resumeInput();
         return this.toServer(data)
     }
 
@@ -1072,6 +1103,7 @@ export class GoTTYXterm {
     setPasteSender(sender: (text: string, bracketed: boolean) => void): void {
         this.unbindPaste?.();
         this.unbindPaste = bindPaste(this.term.element ?? this.elem, () => ({enabled: !this.readOnly && !this.replaying && !this.term.options.disableStdin, bracketed: this.term.modes.bracketedPasteMode && !this.term.options.ignoreBracketedPasteMode}), (text, bracketed) => {
+            this.resumeInput();
             this.inputTransformer?.('');
             this.inputCallbacks.forEach(callback => callback());
             sender(text, bracketed);
@@ -1160,6 +1192,7 @@ export class GoTTYXterm {
 
     reset(): void {
         this.removeMessage();
+        this.viewport?.reset();
         this.term.reset();
         this.hideUploadModal();
     }
@@ -1194,11 +1227,13 @@ export class GoTTYXterm {
         window.removeEventListener("orientationchange", this.resizeListener);
         if (window.visualViewport && this.viewportResizeListener) {
             window.visualViewport.removeEventListener("resize", this.viewportResizeListener);
+            window.visualViewport.removeEventListener("scroll", this.viewportResizeListener);
         }
         if (this.fitRequestId !== null) {
             cancelAnimationFrame(this.fitRequestId);
             this.fitRequestId = null;
         }
+        this.viewport?.dispose(); this.returnInput?.remove();
         this.term.dispose();
         this.dropOverlay?.destroy();
         this.hideUploadModal();
@@ -1220,7 +1255,7 @@ export class GoTTYXterm {
     }
 
     scrollToBottom(): void {
-        this.term.scrollToBottom();
+        this.viewport?.layout();
     }
 
     private showCopySuccessMessage(text: string): void {

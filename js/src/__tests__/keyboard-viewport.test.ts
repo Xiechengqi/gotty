@@ -88,4 +88,15 @@ describe("watchVisibleArea", () => {
     vv.dispatchEvent(new Event("scroll"));
     expect(onChange).not.toHaveBeenCalled();
   });
+
+  it("freezes keyboard placement during pinch/pan and resumes at normal scale", () => {
+    const { input, vv, onChange, stop } = setup();
+    input.focus(); vv.height = 450; vv.dispatchEvent(new Event('resize'));
+    onChange.mockClear(); vv.scale = 2; vv.height = 225; vv.offsetTop = 80;
+    vv.dispatchEvent(new Event('resize')); vv.dispatchEvent(new Event('scroll'));
+    expect(onChange).not.toHaveBeenCalled();
+    vv.scale = 1; vv.height = 450; vv.dispatchEvent(new Event('scroll'));
+    expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({keyboardOpen: true, top: 80, height: 450}));
+    stop();
+  });
 });

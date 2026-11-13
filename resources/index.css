@@ -26,9 +26,24 @@ body {
 
 #terminal {
   position: relative;
+  top: var(--gotty-viewport-top, 0px);
+  height: var(--gotty-viewport-height, 100%);
+  min-height: 0;
+  box-sizing: border-box;
   overflow: auto;
+  overflow-anchor: none;
   padding-bottom: env(safe-area-inset-bottom, 0px);
 }
+
+.gotty-return-input {
+  position: fixed;
+  bottom: calc(var(--gotty-bottom-inset, 0px) + 12px + env(safe-area-inset-bottom));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1001;
+  white-space: nowrap;
+}
+.gotty-return-input[hidden] { display: none; }
 
 .progress .progress-bar {
   transition: unset;

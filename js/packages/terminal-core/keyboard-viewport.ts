@@ -40,7 +40,11 @@ export function watchVisibleArea(
     onChange: (area: VisibleArea) => void,
 ): () => void {
     let focused = document.activeElement === input;
-    const update = () => onChange(computeVisibleArea(window.innerHeight, vv, focused));
+    // Freeze application placement during native pinch/pan. Zoom must not
+    // masquerade as a keyboard resize or close an already open key strip.
+    const update = () => {
+        if (Math.abs(vv.scale - 1) <= 0.01) onChange(computeVisibleArea(window.innerHeight, vv, focused));
+    };
     const onFocus = () => { focused = true; update(); };
     const onBlur = () => { focused = false; update(); };
 

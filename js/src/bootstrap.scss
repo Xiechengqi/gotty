@@ -187,8 +187,10 @@
 
 // xterm 容器样式
 .xterm {
-    height: 100%;
-    overflow-x: auto;
+    // The confirmed shared screen can exceed this client's container. Keep
+    // pixel scrolling on #terminal so it can reveal any row of that screen.
+    min-height: 100%;
+    overflow: visible;
 }
 
 .xterm-viewport {
@@ -208,11 +210,6 @@
 
 // 移动端样式 (<768px)
 @media (max-width: 767px) {
-    .xterm {
-        overflow-x: auto;
-        -webkit-overflow-scrolling: touch;
-    }
-
     .connection-count {
         top: 5px;
         right: 5px;

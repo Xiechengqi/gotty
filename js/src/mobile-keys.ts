@@ -29,7 +29,7 @@ const STYLE = `
     display: flex;
     flex-direction: column;
     gap: 4px;
-    padding: 4px;
+    padding: 4px 4px calc(4px + env(safe-area-inset-bottom));
     box-sizing: border-box;
     background: rgba(30,30,30,0.92);
     backdrop-filter: blur(8px);
@@ -80,6 +80,7 @@ export interface MobileKeysHost {
     // Fit the grid to the container, keeping the scroll position.
     fit(): void;
     setInputTransformer(fn: ((data: string) => string) | null): void;
+    resumeInput?(): void;
 }
 
 export class MobileKeys {
@@ -198,6 +199,7 @@ export class MobileKeys {
     }
 
     private press(key: KeyDef): void {
+        if (key.kind !== 'mod') this.host.resumeInput?.();
         switch (key.kind) {
             case "mod":
                 this.mods[key.mod] = !this.mods[key.mod];
