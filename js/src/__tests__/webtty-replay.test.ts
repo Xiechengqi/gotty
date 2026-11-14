@@ -61,9 +61,11 @@ it('orders geometry after preceding output and before following output', () => {
 it('soft reconnect resumes only committed output and retains the renderer', () => {
   const p = setup(); p.receive(begin()); p.receive(output('history')); p.receive(end()); p.drainAll();
   p.receive(event(3, output('last packet'))); p.wt.reconnectNow();
-  expect(p.sockets).toHaveLength(2); expect(p.sockets[1].send).not.toHaveBeenCalled();
-  p.wt.takeSizeControl(); expect(p.sockets[1].send).not.toHaveBeenCalled();
+  expect(p.sockets).toHaveLength(1);
+  const sent = p.sockets[0].send.mock.calls.length;
+  p.wt.takeSizeControl(); expect(p.sockets[0].send).toHaveBeenCalledTimes(sent);
   p.drain();
+  expect(p.sockets).toHaveLength(2);
   const init = JSON.parse(p.sockets[1].send.mock.calls[0][0]);
   expect(init).toMatchObject({Epoch:'one',ReplayVersion:2,LastSequence:3});
   expect(p.terminal.reset).toHaveBeenCalledOnce();

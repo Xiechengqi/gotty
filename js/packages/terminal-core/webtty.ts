@@ -25,6 +25,8 @@ export const msgStreamEvent = 'c';
 
 declare var gotty_resize_debounce_ms: number;
 
+export type ConnectionCloseEvent = CloseEvent & {retryable?: boolean; retryAfterMs?: number};
+
 interface ReplayBeginPayload {
     epoch: string;
     mode: "resume" | "tail" | "snapshot" | "events";
@@ -206,6 +208,12 @@ export class WebTTY {
     private inputSender: InputSender;
     private adaptivePresence = false;
     private pageActive = true;
+    private retryBlocked = false;
+    private retryNotBefore = 0;
+    private authenticationRetries = 0;
+    private stableTimer: ReturnType<typeof setTimeout> | null = null;
+    private connectingAfterDrain = false;
+    private connectGeneration = 0;
 
     /*
      * The server's buffer size. If a single message exceeds this size, it will
@@ -284,6 +292,9 @@ export class WebTTY {
 
         return () => {
             this.stopped = true;
+            this.connectGeneration++;
+            this.connectingAfterDrain = false;
+            this.clearStableTimer();
             this.inputSender.dispose();
             clearInterval(presence);
             this.onDisconnect?.();
@@ -322,24 +333,44 @@ export class WebTTY {
     }
 
     private connectNow(resetBackoff = false): void {
-        if (this.stopped || document.hidden) {
+        if (this.stopped || document.hidden || this.retryBlocked || this.connectingAfterDrain) {
             return;
         }
         if (this.connection && this.isConnectingOrOpen(this.connection)) {
             return;
         }
+        if (Date.now() < this.retryNotBefore) {
+            if (this.reconnectTimer === null) {
+                this.reconnectTimer = setTimeout(() => {
+                    this.reconnectTimer = null;
+                    this.connectNow(false);
+                }, this.retryNotBefore - Date.now());
+            }
+            return;
+        }
+        this.retryNotBefore = 0;
         if (resetBackoff) {
             this.reconnectAttempts = 0;
         }
         this.clearReconnectTimer();
         this.clearProbeTimer();
+        // Commit the previous renderer's resume position before opening a new
+        // transport. Its authentication deadline must not include parser work.
+        this.connectingAfterDrain = true;
+        const generation = ++this.connectGeneration;
+        this.enqueueAfterDrain(() => {
+            if (generation !== this.connectGeneration) return;
+            this.connectingAfterDrain = false;
+            if (!this.stopped && !document.hidden && !this.retryBlocked) this.startConnection();
+        });
+    }
 
+    private startConnection(): void {
         let connection: Connection;
         try {
             connection = this.connectionFactory.create();
         } catch (err) {
-            console.error("[GoTTY] Failed to create websocket:", err);
-            this.scheduleReconnect();
+            if (!this.blockSecurityFailure(err)) this.scheduleReconnect('Unable to create terminal connection');
             return;
         }
 
@@ -349,44 +380,41 @@ export class WebTTY {
             if (this.stopped || this.connection !== connection) {
                 return;
             }
-            this.reconnectAttempts = 0;
-            this.enqueueAfterDrain(() => {
-                if (this.stopped || this.connection !== connection) return;
-                if (this.snapshotRequired) { this.epoch = ''; this.sequence = 0; this.snapshotRequired = false; }
-                this.onConnect?.();
-                this.term.removeMessage();
-                const termInfo = this.term.info();
+            if (this.snapshotRequired) { this.epoch = ''; this.sequence = 0; this.snapshotRequired = false; }
+            this.term.removeMessage();
+            const termInfo = this.term.info();
 
-                this.initializeConnection(this.args, this.authToken);
+            this.initializeConnection(this.args, this.authToken);
+            if (!this.initialized) {connection.close(); return;}
+            this.onConnect?.();
 
-                this.term.onResize((columns: number, rows: number) => {
-                    this.queueResizeTerminal(columns, rows);
-                });
-
-                this.sendResizeTerminal(termInfo.columns, termInfo.rows);
-                this.sendSetEncoding("base64");
-
-                this.term.onInput((input: string | Uint8Array) => {
-                    this.sendInput(input);
-                });
-                this.term.setPasteSender?.((text, bracketed) => {
-                    if (!this.replayActive && !this.stopped && this.initialized) this.inputSender.paste(text, bracketed);
-                });
-
-                this.term.setSizeControlSender?.(() => this.takeSizeControl());
-                if ('setUploadFileSender' in this.term) {
-                    (this.term as any).setUploadFileSender((msg: string) => this.sendUploadFile(msg));
-                }
-                if ('setUploadFileBufferSize' in this.term) {
-                    (this.term as any).setUploadFileBufferSize(this.bufSize);
-                }
-
-                this.lastPongAt = Date.now();
-                this.clearPingTimer();
-                this.pingTimer = setInterval(() => {
-                    this.sendPing();
-                }, 30 * 1000);
+            this.term.onResize((columns: number, rows: number) => {
+                this.queueResizeTerminal(columns, rows);
             });
+
+            this.sendResizeTerminal(termInfo.columns, termInfo.rows);
+            this.sendSetEncoding("base64");
+
+            this.term.onInput((input: string | Uint8Array) => {
+                this.sendInput(input);
+            });
+            this.term.setPasteSender?.((text, bracketed) => {
+                if (!this.replayActive && !this.stopped && this.initialized) this.inputSender.paste(text, bracketed);
+            });
+
+            this.term.setSizeControlSender?.(() => this.takeSizeControl());
+            if ('setUploadFileSender' in this.term) {
+                (this.term as any).setUploadFileSender((msg: string) => this.sendUploadFile(msg));
+            }
+            if ('setUploadFileBufferSize' in this.term) {
+                (this.term as any).setUploadFileBufferSize(this.bufSize);
+            }
+
+            this.lastPongAt = Date.now();
+            this.clearPingTimer();
+            this.pingTimer = setInterval(() => {
+                this.sendPing();
+            }, 30 * 1000);
         });
 
         connection.onReceive((data) => {
@@ -394,6 +422,17 @@ export class WebTTY {
                 return;
             }
             this.receiveMessage(data);
+            if (this.connection === connection && this.initialized && this.stableTimer === null && /^[1-9abce]/.test(data)) {
+                // An OPEN socket can still fail authentication or immediately
+                // disconnect. Only a working, stable stream resets backoff.
+                this.stableTimer = setTimeout(() => {
+                    this.stableTimer = null;
+                    if (this.connection === connection && this.initialized) {
+                        this.reconnectAttempts = 0;
+                        this.authenticationRetries = 0;
+                    }
+                }, 5000);
+            }
         });
 
         connection.onClose((event) => {
@@ -402,6 +441,7 @@ export class WebTTY {
             }
             this.clearPingTimer();
             this.clearProbeTimer();
+            this.clearStableTimer();
             this.connection = null;
             this.initialized = false;
             this.inputSender.disconnect();
@@ -410,27 +450,44 @@ export class WebTTY {
             this.onDisconnect?.();
             if (!this.stopped) {
                 const closeMessage = this.describeClose(event);
+                const failure = event as ConnectionCloseEvent;
+                if (failure.retryable === false || (event.code === 1008 && !this.isAuthenticationClose(event))) {
+                    this.retryBlocked = true;
+                    this.term.showMessage(`${closeMessage}. Automatic reconnect stopped. Use Refresh to retry.`, 0);
+                    return;
+                }
                 if (this.isAuthenticationClose(event)) {
+                    if (/^Authentication (timed out|ticket expired or invalid)$/.test(event.reason) && this.authenticationRetries++ < 1) {
+                        this.scheduleReconnect(closeMessage);
+                        return;
+                    }
+                    this.retryBlocked = true;
                     this.term.showMessage(`${closeMessage}. Refresh the page or sign in again.`, 0);
                     return;
                 }
-                this.scheduleReconnect(closeMessage);
+                this.scheduleReconnect(closeMessage, failure.retryAfterMs ?? (event.reason === 'Hub connection rate limit reached' ? 60000 : 0));
             }
         });
 
         try {
             connection.open();
         } catch (err) {
-            console.error("[GoTTY] Failed to open websocket:", err);
             if (this.connection === connection) {
                 this.connection = null;
             }
-            this.scheduleReconnect();
+            connection.close();
+            if (!this.blockSecurityFailure(err)) this.scheduleReconnect('Unable to open terminal connection');
         }
     }
 
     reconnectNow(): void {
         if (this.stopped) return;
+        this.retryBlocked = false;
+        this.retryNotBefore = 0;
+        this.authenticationRetries = 0;
+        this.connectGeneration++;
+        this.connectingAfterDrain = false;
+        this.clearStableTimer();
         this.inputSender.disconnect();
         if (this.replayActive && this.replayMode !== 'events' && this.replayMode !== 'resume') this.snapshotRequired = true;
         const old = this.connection;
@@ -465,6 +522,13 @@ export class WebTTY {
     }
 
     private receiveMessage(data: string): void {
+        // A slow renderer must not turn a successful liveness probe into a
+        // disconnect. Heartbeats do not affect output ordering or replay.
+        if (data[0] === msgPong) {
+            this.lastPongAt = Date.now();
+            this.clearProbeTimer();
+            return;
+        }
         // Receipts must not wait for the output renderer; a busy renderer must
         // not stall paste flow control or its cancellation response.
         if (data[0] === 'e') {
@@ -672,7 +736,7 @@ export class WebTTY {
     }
 
     private probeOrReconnect(): void {
-        if (this.stopped || document.hidden) {
+        if (this.stopped || document.hidden || this.retryBlocked) {
             return;
         }
         const connection = this.connection;
@@ -680,7 +744,7 @@ export class WebTTY {
             this.connectNow(true);
             return;
         }
-        if (connection.readyState() === WebSocket.OPEN) {
+        if (connection.readyState() === WebSocket.OPEN && this.initialized) {
             const sentAt = Date.now();
             if (!this.sendPing()) {
                 connection.close();
@@ -695,12 +759,15 @@ export class WebTTY {
         }
     }
 
-    private scheduleReconnect(reason = ""): void {
-        if (this.stopped || document.hidden) {
+    private scheduleReconnect(reason = "", minimumDelay = 0): void {
+        if (this.stopped || this.retryBlocked) {
             return;
         }
+        const cooldown = Number.isFinite(minimumDelay) ? Math.max(0, minimumDelay) : 0;
+        this.retryNotBefore = Math.max(this.retryNotBefore, Date.now() + cooldown);
+        if (document.hidden) return;
         this.clearReconnectTimer();
-        const delay = this.nextReconnectDelay();
+        const delay = Math.max(this.nextReconnectDelay(), this.retryNotBefore - Date.now());
         const seconds = Math.max(1, Math.round(delay / 1000));
         const message = reason
             ? `${reason}. Reconnecting in ${seconds}s...`
@@ -720,6 +787,18 @@ export class WebTTY {
 
     private isAuthenticationClose(event: CloseEvent): boolean {
         return event.code === 1008 && /auth/i.test(event.reason);
+    }
+
+    private blockSecurityFailure(error: unknown): boolean {
+        if (!error || typeof error !== 'object' || !('name' in error) || error.name !== 'SecurityError') return false;
+        this.retryBlocked = true;
+        this.term.showMessage('WebSocket blocked by browser security policy. Automatic reconnect stopped. Use Refresh to retry.', 0);
+        return true;
+    }
+
+    private clearStableTimer(): void {
+        if (this.stableTimer !== null) clearTimeout(this.stableTimer);
+        this.stableTimer = null;
     }
 
     private nextReconnectDelay(): number {
