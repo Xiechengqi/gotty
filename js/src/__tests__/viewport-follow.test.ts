@@ -14,13 +14,24 @@ const render = () => {const callbacks = [...frames.values()]; frames.clear(); ca
 function touch(host: HTMLElement, type: string, x = 100, y = 100) {
     const event = new Event(type, {bubbles: true});
     Object.defineProperty(event, 'touches', {value: type === 'touchend' ? [] : [{clientX: x, clientY: y}]});
+    Object.defineProperty(event, 'changedTouches', {value: [{clientX: x, clientY: y}]});
     host.dispatchEvent(event);
+}
+
+function finger(host: HTMLElement, type: string, y: number, x = 100) {
+    const event = new Event(type, {bubbles: true, cancelable: true});
+    const point = {identifier: 1, clientX: x, clientY: y};
+    Object.defineProperties(event, {touches: {value: type === 'touchend' ? [] : [point]},
+        changedTouches: {value: [point]}});
+    host.dispatchEvent(event);
+    return event;
 }
 
 function setup() {
     const host = document.createElement('div'), screen = document.createElement('div');
     screen.className = 'xterm-screen'; host.append(screen); document.body.append(host);
-    Object.defineProperties(host, {clientHeight: {value: 480, configurable: true}, clientWidth: {value: 390}});
+    Object.defineProperties(host, {clientHeight: {value: 480, configurable: true}, clientWidth: {value: 390},
+        scrollHeight: {value: 1200, configurable: true}});
     host.getBoundingClientRect = () => ({top: 0, left: 0, width: 390, height: 480}) as DOMRect;
     screen.getBoundingClientRect = () => ({top: -host.scrollTop, left: -host.scrollLeft, width: 1600, height: 1200}) as DOMRect;
     const events = new Map<string, Set<() => void>>();
@@ -203,4 +214,83 @@ it('leaves native pinch/pan alone and releases every event subscription/frame on
     vv.scale = 1; follow.layout(); render(); expect(host.scrollTop).toBe(0);
     follow.layout(); expect(frames.size).toBe(1); follow.dispose();
     expect(frames.size).toBe(0); emit('parsed'); expect(frames.size).toBe(0);
+});
+
+it('touches into retained history without outer overflow and keeps that content while output arrives', () => {
+    const {host, active, emit, follow} = setup();
+    Object.defineProperty(host, 'clientHeight', {value: 1200}); render();
+    finger(host, 'touchstart', 100);
+    expect(finger(host, 'touchmove', 180).defaultPrevented).toBe(true); render();
+    expect(active.viewportY).toBe(96); expect(host.scrollTop).toBe(0);
+    expect(host.dataset.viewportFollowing).toBe('false');
+    active.baseY = 110; emit('parsed'); render();
+    expect(active.viewportY).toBe(96);
+    finger(host, 'touchmove', 200); render();
+    expect(active.viewportY).toBe(95);
+    follow.userInput(); render();
+    expect(active.viewportY).toBe(110); expect(host.dataset.viewportFollowing).toBe('true');
+});
+
+it('crosses from the shared screen into history and back to live without changing the PTY grid', () => {
+    const {host, active, term} = setup(); render();
+    finger(host, 'touchstart', 100); finger(host, 'touchmove', 900); render();
+    expect(host.scrollTop).toBe(0); expect(active.viewportY).toBe(96);
+    finger(host, 'touchmove', 0); render();
+    expect(host.scrollTop).toBe(720); expect(active.viewportY).toBe(100);
+    expect(host.dataset.viewportFollowing).toBe('true');
+    expect([term.cols, term.rows]).toEqual([160, 60]);
+});
+
+it('accumulates slow sub-line touch motion and leaves a live-boundary gesture following output', () => {
+    const {host, active} = setup();
+    Object.defineProperty(host, 'clientHeight', {value: 1200}); render();
+    finger(host, 'touchstart', 100); finger(host, 'touchmove', 70); render();
+    expect(active.viewportY).toBe(100); expect(host.dataset.viewportFollowing).toBe('true');
+    finger(host, 'touchstart', 100); finger(host, 'touchmove', 109); render();
+    finger(host, 'touchmove', 115); render(); expect(active.viewportY).toBe(100);
+    finger(host, 'touchmove', 121); render(); expect(active.viewportY).toBe(99);
+});
+
+it('keeps local touch history available to read-only viewers and drops pending motion during replay/layout', () => {
+    const {host, active, term, follow} = setup();
+    (term as any).options = {disableStdin: true};
+    Object.defineProperty(host, 'clientHeight', {value: 1200}); render();
+    finger(host, 'touchstart', 100); finger(host, 'touchmove', 180); render();
+    expect(active.viewportY).toBe(96);
+    finger(host, 'touchmove', 260); follow.changeLayout(() => {}); render();
+    expect(active.viewportY).toBe(96);
+    follow.setReplayMode(true);
+    finger(host, 'touchstart', 100);
+    expect(finger(host, 'touchmove', 180).defaultPrevented).toBe(false); render();
+    expect(active.viewportY).toBe(96);
+});
+
+it('leaves horizontal gestures, selection and pinch zoom to their existing handlers', () => {
+    const {host, active, select} = setup(); render();
+    finger(host, 'touchstart', 100, 100);
+    expect(finger(host, 'touchmove', 110, 200).defaultPrevented).toBe(false); render();
+    expect(active.viewportY).toBe(100); expect(host.scrollTop).toBe(720);
+    vi.stubGlobal('visualViewport', {scale: 2});
+    finger(host, 'touchstart', 100);
+    expect(finger(host, 'touchmove', 200).defaultPrevented).toBe(false);
+    vi.stubGlobal('visualViewport', {scale: 1}); select();
+    finger(host, 'touchstart', 100);
+    expect(finger(host, 'touchmove', 200).defaultPrevented).toBe(false);
+});
+
+it('only forwards alternate-screen touch wheels with a writable negotiated mouse protocol', () => {
+    const {host, active, term} = setup();
+    active.type = 'alternate'; active.baseY = active.viewportY = 0;
+    Object.defineProperty(host, 'clientHeight', {value: 1200}); render();
+    (term as any).options = {disableStdin: false};
+    (term as any).modes = {mouseTrackingMode: 'vt200'};
+    const wheels: number[] = [];
+    host.querySelector('.xterm-screen')!.addEventListener('wheel', e => wheels.push((e as WheelEvent).deltaY));
+    finger(host, 'touchstart', 100); finger(host, 'touchmove', 160); render();
+    expect(wheels).toEqual([-1, -1, -1]);
+    (term as any).options.disableStdin = true;
+    finger(host, 'touchstart', 100); finger(host, 'touchmove', 160); render();
+    (term as any).options.disableStdin = false; (term as any).modes.mouseTrackingMode = 'none';
+    finger(host, 'touchstart', 100); finger(host, 'touchmove', 160); render();
+    expect(wheels).toEqual([-1, -1, -1]);
 });

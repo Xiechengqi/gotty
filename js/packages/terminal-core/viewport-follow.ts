@@ -1,5 +1,7 @@
 // A shared PTY can be taller than this browser. Xterm's own scrollback and
 // the outer element's pixel scroll are separate; neither changes PTY geometry.
+import {TouchScroll} from './touch-scroll';
+
 interface Disposable { dispose(): void }
 interface FollowTerminal {
     rows: number;
@@ -19,6 +21,8 @@ interface FollowTerminal {
     clearSelection(): void;
     scrollToBottom(): void;
     scrollToLine(line: number): void;
+    readonly options?: {disableStdin?: boolean};
+    readonly modes?: {mouseTrackingMode: string};
     registerMarker?(offset: number): {line: number; dispose(): void} | undefined;
     parser: {
         registerCsiHandler(id: {prefix: string; final: string}, handler: (params: (number | number[])[]) => boolean): Disposable;
@@ -42,7 +46,8 @@ export class ViewportFollow {
     private lastTop: number;
     private lastBase: number;
     private intentUntil = 0;
-    private touch?: {x: number; y: number};
+    private touchScroll: TouchScroll;
+    private touchRemainder = 0;
     private liveAnchor?: {row: number; rows: number; type: string};
     private saved?: Position;
     private anchor?: {line: number; top: number; marker?: {line: number; dispose(): void}};
@@ -56,7 +61,7 @@ export class ViewportFollow {
         this.publish();
         this.disposables.push(
             term.onCursorMove(this.layout), term.onWriteParsed(this.layout), term.onRender(this.layout),
-            term.buffer.onBufferChange(() => {this.liveAnchor = undefined; this.layout();}), term.onKey(() => this.userInput()),
+            term.buffer.onBufferChange(() => {this.touchScroll?.stop(); this.liveAnchor = undefined; this.layout();}), term.onKey(() => this.userInput()),
             term.onSelectionChange(() => {if (!this.replaying && term.hasSelection()) this.follow(false, 'selection');}),
             term.onScroll(() => {
                 if (this.changing || this.replaying) return;
@@ -91,6 +96,7 @@ export class ViewportFollow {
             this.navigation();
         });
         this.listen(host, 'wheel', event => {
+            if (!this.changing) this.touchScroll?.stop();
             const e = event as WheelEvent;
             if (e.ctrlKey || Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;
             this.markIntent();
@@ -104,27 +110,15 @@ export class ViewportFollow {
             if (this.intentUntil > Date.now()) this.intentUntil = Date.now() + 250;
             this.navigation();
         });
-        this.listen(host, 'touchstart', event => {
-            const touches = (event as TouchEvent).touches;
-            this.touch = touches.length === 1 ? {x: touches[0].clientX, y: touches[0].clientY} : undefined;
-            if (touches.length !== 1) this.intentUntil = 0;
-        }, true);
-        this.listen(host, 'touchmove', event => {
-            const touches = (event as TouchEvent).touches;
-            if (!this.touch || touches.length !== 1) return;
-            const dx = touches[0].clientX - this.touch.x, dy = touches[0].clientY - this.touch.y;
-            if (Math.abs(dy) > 8 && Math.abs(dy) > Math.abs(dx)) {
-                // A gesture at the live boundary may not scroll anything.
-                // Pause only when either scroll layer actually leaves live.
-                this.markIntent();
-            }
-        }, true);
-        const touchDone = () => {
-            if (this.touch && this.intentUntil > Date.now()) this.intentUntil = Date.now() + 1500;
-            this.touch = undefined; this.navigation(); this.layout();
-        };
-        this.listen(host, 'touchend', touchDone);
-        this.listen(host, 'touchcancel', touchDone);
+        this.touchScroll = new TouchScroll(host, {
+            enabled: () => this.touchEnabled(),
+            start: () => {this.touchRemainder = 0;},
+            intent: () => this.markIntent(1500),
+            cancel: () => {this.intentUntil = 0; this.touchRemainder = 0;},
+            scroll: (pixels, point) => this.scrollTouch(pixels, point),
+            end: () => {this.navigation(); this.layout();},
+            momentum: () => term.buffer.active.type === 'normal',
+        });
         // IME commits have no onKey; clipboard/voice/shortcut callers also call
         // userInput explicitly. Terminal query replies never resume following.
         this.listen(host, 'beforeinput', () => this.userInput());
@@ -160,6 +154,50 @@ export class ViewportFollow {
         this.intentUntil = Date.now() + duration;
         // Fresh user input takes precedence over a previous layout barrier.
         this.settling = 0; cancelAnimationFrame(this.settleFrame); this.settleFrame = 0;
+    }
+
+    private touchEnabled() {
+        const vv = this.host.ownerDocument.defaultView?.visualViewport;
+        return !this.disposed && !this.replaying && !this.host.ownerDocument.hidden
+            && !!this.host.clientHeight && !!this.host.clientWidth && !this.term.hasSelection()
+            && !this.host.ownerDocument.getSelection()?.toString()
+            && (!vv || Math.abs(vv.scale - 1) <= 0.01);
+    }
+
+    private scrollTouch(pixels: number, point: {x: number; y: number}) {
+        const {term, host} = this, b = term.buffer.active;
+        const height = (host.querySelector('.xterm-screen')?.getBoundingClientRect().height || 0) / term.rows;
+        if (!Number.isFinite(height) || height <= 0) return false;
+        this.markIntent(1500);
+        let remaining = pixels + this.touchRemainder;
+        this.touchRemainder = 0;
+        const inner = b.viewportY, outer = host.scrollTop;
+        this.changing = true;
+        try {
+            const max = Math.max(0, host.scrollHeight - host.clientHeight);
+            host.scrollTop = Math.max(0, Math.min(max, outer + remaining));
+            remaining -= host.scrollTop - outer;
+            if (b.type === 'normal') {
+                const lines = Math.trunc(remaining / height);
+                if (lines) term.scrollToLine(Math.max(0, Math.min(b.baseY, inner + lines)));
+                remaining -= (b.viewportY - inner) * height;
+                if (remaining < 0 ? b.viewportY > 0 : b.viewportY < b.baseY) this.touchRemainder = remaining;
+            } else if (remaining && term.options?.disableStdin === false
+                && ['vt200', 'drag', 'any'].includes(term.modes?.mouseTrackingMode || '')) {
+                // Reuse xterm's encoding of the negotiated mouse protocol.
+                // Never synthesize arrow keys for an application without it.
+                const lines = Math.trunc(remaining / height);
+                for (let i = 0; i < Math.min(8, Math.abs(lines)); i++) {
+                    host.querySelector('.xterm-screen')?.dispatchEvent(new WheelEvent('wheel', {
+                        bubbles: true, cancelable: true, clientX: point.x, clientY: point.y, deltaY: Math.sign(lines), deltaMode: 1,
+                    }));
+                }
+                this.touchRemainder = remaining - lines * height;
+            }
+            this.lastTop = host.scrollTop; this.lastBase = b.baseY;
+        } finally {this.changing = false;}
+        this.navigation(); this.layout();
+        return inner !== b.viewportY || outer !== host.scrollTop || this.touchRemainder !== 0;
     }
 
     private navigation() {
@@ -232,6 +270,7 @@ export class ViewportFollow {
     // Wrap confirmed-grid/font layout changes so xterm's resize scroll events
     // cannot be mistaken for deliberate history navigation.
     changeLayout(update: () => void) {
+        this.touchScroll.stop();
         const position = !this.following && !this.replaying ? this.position() : undefined;
         this.settleLayout();
         this.changing = true;
@@ -249,6 +288,7 @@ export class ViewportFollow {
 
     setReplayMode(active: boolean) {
         if (active === this.replaying) return;
+        this.touchScroll.stop();
         if (active) this.saved = this.position();
         this.replaying = active;
         if (!active) {
@@ -263,6 +303,7 @@ export class ViewportFollow {
 
     userInput() {
         if (this.replaying || this.disposed) return;
+        this.touchScroll.stop();
         this.intentUntil = 0;
         this.term.clearSelection();
         this.follow(true); this.horizontal = true; this.layout();
@@ -351,6 +392,7 @@ export class ViewportFollow {
     };
 
     dispose() {
+        this.touchScroll.dispose();
         this.disposed = true; cancelAnimationFrame(this.frame); cancelAnimationFrame(this.settleFrame);
         this.anchor?.marker?.dispose();
         this.disposables.forEach(value => value.dispose());

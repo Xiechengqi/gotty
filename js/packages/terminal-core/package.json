@@ -1,6 +1,6 @@
 {
   "name": "@gotty/terminal-core",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "private": false,
   "type": "module",
   "main": "webtty.ts",
@@ -10,6 +10,7 @@
     "paste.ts",
     "geometry.ts",
     "viewport-follow.ts",
+    "touch-scroll.ts",
     "presentation.ts",
     "LICENSE",
     "voice-input.ts",
