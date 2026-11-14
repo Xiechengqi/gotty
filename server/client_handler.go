@@ -19,6 +19,8 @@ type clientResizeRequest struct {
 	ViewportWidth  int     `json:"viewportWidth"`
 	ViewportHeight int     `json:"viewportHeight"`
 	Visible        *bool   `json:"visible,omitempty"`
+	PageVisible    *bool   `json:"pageVisible,omitempty"`
+	PaneVisible    *bool   `json:"paneVisible,omitempty"`
 	TakeControl    bool    `json:"takeControl,omitempty"`
 }
 

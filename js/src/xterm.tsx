@@ -8,6 +8,7 @@ import { ZModemAddon } from "./zmodem";
 import { TerminalStatePayload } from "./webtty";
 import { describeGeometry } from '../packages/terminal-core/geometry';
 import {ViewportFollow} from '../packages/terminal-core/viewport-follow';
+import {InitialPresentation} from '../packages/terminal-core/presentation';
 import {bindPaste, type PasteState} from '../packages/terminal-core/paste';
 import {PasteProgress} from './paste-progress';
 import { defaultDisplayOptions, terminalPreferences } from "../packages/terminal-core/appearance";
@@ -366,6 +367,8 @@ export class GoTTYXterm {
     private inputTransformer: ((data: string) => string) | null = null;
     private mobileViewportManaged = false;
     private viewport?: ViewportFollow;
+    private presentation?: InitialPresentation;
+    private presentationParsed?: IDisposable;
     private returnInput?: HTMLButtonElement;
 
     constructor(elem: HTMLElement, preferences: Record<string, unknown> = {}, options: GoTTYXtermOptions = {}) {
@@ -575,6 +578,8 @@ export class GoTTYXterm {
         this.returnInput.addEventListener('click', () => {this.resumeInput(); this.term.focus();});
         elem.ownerDocument.body.appendChild(this.returnInput);
         this.viewport = new ViewportFollow(this.term, elem, following => {this.returnInput!.hidden = following;});
+        this.presentation = new InitialPresentation(elem, !this.readOnly, this.viewport.layout);
+        this.presentationParsed = this.term.onWriteParsed(this.presentation.outputParsed);
 
         try {
             const webgl = new WebglAddon();
@@ -874,19 +879,30 @@ export class GoTTYXterm {
 
     private fitTerminal(): void {
         // Fit terminal size to the container so the viewport can reach the bottom.
+        if (!this.elem.clientWidth || !this.elem.clientHeight || document.hidden) return;
         const size = this.fitAddOn.proposeDimensions();
-        if (!size || !this.elem.clientWidth || !this.elem.clientHeight) return;
+        if (!size || !Number.isInteger(size.cols) || size.cols <= 0 || !Number.isInteger(size.rows) || size.rows <= 0) return;
+        this.presentation?.measured(size.cols, size.rows);
         if (!this.requestedSize || this.requestedSize.cols !== size.cols || this.requestedSize.rows !== size.rows) {
             this.requestedSize = size;
             this.resizeCallback?.(size.cols,size.rows);
         }
         const grid = this.serverSize || size;
-        this.viewport?.changeLayout(() => this.term.resize(grid.cols,grid.rows));
+        if (this.term.cols !== grid.cols || this.term.rows !== grid.rows) this.viewport?.changeLayout(() => this.term.resize(grid.cols,grid.rows));
+        else this.viewport?.layout();
         this.updateGeometryHint();
     }
 
     info(): { columns: number, rows: number } {
-        return { columns: this.requestedSize?.cols ?? this.term.cols, rows: this.requestedSize?.rows ?? this.term.rows };
+        try {
+            if (!document.hidden && this.isVisible()) {
+                const size = this.fitAddOn.proposeDimensions();
+                if (size && Number.isInteger(size.cols) && size.cols > 0 && Number.isInteger(size.rows) && size.rows > 0) {
+                    this.requestedSize = size; this.presentation?.measured(size.cols, size.rows);
+                }
+            }
+        } catch { /* Font metrics may not be ready on the first frame. */ }
+        return { columns: this.requestedSize?.cols ?? 0, rows: this.requestedSize?.rows ?? 0 };
     };
 
     // This gets called from the Websocket's onReceive handler
@@ -904,6 +920,7 @@ export class GoTTYXterm {
     setReplayMode(active: boolean) {
         this.replaying = active;
         this.viewport?.setReplayMode(active);
+        this.presentation?.replay(active);
         this.elem.dataset.replayActive = String(active);
     }
 
@@ -1035,10 +1052,14 @@ export class GoTTYXterm {
 
     updateTerminalState(state: TerminalStatePayload) {
         this.geometryState = state;
+        this.elem.dataset.terminalGeometry = JSON.stringify({columns: state.activeCols, rows: state.activeRows, policy: state.policy,
+            source: state.leaderDevice, pageVisible: state.leaderPageVisible, paneVisible: state.leaderPaneVisible, retained: state.leaderRetained});
         const cols=state.activeCols, rows=state.activeRows;
         if (Number.isInteger(cols) && cols>0 && cols<=4096 && Number.isInteger(rows) && rows>0 && rows<=4096) {
-            this.serverSize={cols,rows}; this.viewport?.changeLayout(() => this.term.resize(cols,rows));
+            this.serverSize={cols,rows};
+            if (this.term.cols !== cols || this.term.rows !== rows) this.viewport?.changeLayout(() => this.term.resize(cols,rows));
         }
+        this.presentation?.geometry(state);
         if (this.sizeControlBtn && state.reason !== 'snapshot') this.sizeControlBtn.disabled = state.sizeControl !== true;
         this.updateGeometryHint();
         if (!this.terminalStateElem) {
@@ -1050,7 +1071,9 @@ export class GoTTYXterm {
     };
 
     private updateGeometryHint(): void {
-        this.connectionCountElem.title = 'Connections\n' + describeGeometry(this.geometryState, this.info());
+        // Rendering a tooltip must not consume a pending local measurement.
+        const local = this.requestedSize ? {columns: this.requestedSize.cols, rows: this.requestedSize.rows} : undefined;
+        this.connectionCountElem.title = 'Connections\n' + describeGeometry(this.geometryState, local);
     }
 
     showAPIIndicator(execId: string) {
@@ -1164,7 +1187,7 @@ export class GoTTYXterm {
         this.resizeCallback=callback;
     }
 
-    isVisible(): boolean { return !document.hidden && !!this.elem.clientWidth && !!this.elem.clientHeight; }
+    isVisible(): boolean { return !!this.elem.clientWidth && !!this.elem.clientHeight; }
     setSizeControlSender(sender: ()=>void): void {
         this.sizeControlSender=sender;
         if (this.readOnly || this.sizeControlBtn) return;
@@ -1233,7 +1256,7 @@ export class GoTTYXterm {
             cancelAnimationFrame(this.fitRequestId);
             this.fitRequestId = null;
         }
-        this.viewport?.dispose(); this.returnInput?.remove();
+        this.presentationParsed?.dispose(); this.presentation?.dispose(); this.viewport?.dispose(); this.returnInput?.remove();
         this.term.dispose();
         this.dropOverlay?.destroy();
         this.hideUploadModal();

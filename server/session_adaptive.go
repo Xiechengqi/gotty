@@ -29,6 +29,13 @@ func (size resizeDimensions) fresh(now time.Time) bool {
 	return !size.Presence || now.Sub(size.UpdatedAt) < adaptivePresenceTTL
 }
 
+func (size resizeDimensions) retainsGeometry(now time.Time) bool {
+	// Capable clients distinguish an internal pane switch from a background
+	// page. Only an already elected holder can retain geometry this way;
+	// candidates and automatic terminal responders still have to be visible.
+	return size.SplitVisibility && size.Presence && size.fresh(now)
+}
+
 func (size resizeDimensions) priority() int {
 	switch size.InputClass {
 	case "fine":
@@ -55,11 +62,11 @@ func (sm *SessionManager) reconcileAdaptiveLocked(now time.Time) {
 		sm.adaptiveCandidate = ""
 		return
 	}
-	if connected && hasSize && !current.Visible && now.Before(current.HiddenSince.Add(adaptiveHiddenGrace)) {
+	if connected && hasSize && !current.Visible && !current.SplitVisibility && now.Before(current.HiddenSince.Add(adaptiveHiddenGrace)) {
 		sm.adaptiveCandidate = ""
 		return
 	}
-	healthy := connected && hasSize && current.Visible && current.fresh(now)
+	healthy := connected && hasSize && current.fresh(now) && (current.Visible || current.retainsGeometry(now))
 	var best *Client
 	for c := range sm.clients {
 		size := sm.clientSizes[c.id]
@@ -81,9 +88,15 @@ func (sm *SessionManager) reconcileAdaptiveLocked(now time.Time) {
 		return
 	}
 	next := sm.clientSizes[best.id]
-	// Same-class viewers must offer at least 20% more cells; small viewport
-	// fluctuations and equal-sized browser tabs cannot repeatedly steal control.
-	if healthy && next.priority() <= current.priority() && int64(next.Columns)*int64(next.Rows)*5 < int64(current.Columns)*int64(current.Rows)*6 {
+	currentCols, currentRows := current.Columns, current.Rows
+	if !current.Visible && current.retainsGeometry(now) {
+		// A pending measurement may never have reached ioctl before hiding.
+		// Compare candidates against the retained confirmed grid.
+		currentCols, currentRows = sm.activeCols, sm.activeRows
+	}
+	// Lower-priority viewers cannot displace a healthy retained desktop.
+	// Same-class viewers must offer at least 20% more cells.
+	if healthy && (next.priority() < current.priority() || (next.priority() == current.priority() && int64(next.Columns)*int64(next.Rows)*5 < int64(currentCols)*int64(currentRows)*6)) {
 		sm.adaptiveCandidate = ""
 		return
 	}
@@ -100,10 +113,10 @@ func (sm *SessionManager) reconcileAdaptiveLocked(now time.Time) {
 		reason = "adaptive-initial"
 	case !connected:
 		reason = "adaptive-disconnected"
-	case !current.Visible:
-		reason = "adaptive-hidden"
 	case !current.fresh(now):
 		reason = "adaptive-expired"
+	case !current.Visible:
+		reason = "adaptive-hidden"
 	}
 	sm.setLeaderLocked(best)
 	sm.controlReason = reason

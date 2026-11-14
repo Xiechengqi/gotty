@@ -15,7 +15,7 @@ export function describeGeometry(state: TerminalStatePayload | undefined, local:
     const lines = [ `${zh ? '共享网格' : 'Shared grid'}: ${state.activeCols} × ${state.activeRows}` ];
     if (local) lines.push(`${zh ? '本地可用' : 'Local capacity'}: ${local.columns} × ${local.rows}`);
     if (state.policy) lines.push(`${zh ? '尺寸策略' : 'Size policy'}: ${state.policy}`);
-    if (state.leaderClientId) lines.push(`${zh ? '尺寸来源' : 'Size controller'}: ${devices[state.leaderDevice ?? ''] ?? (zh ? '客户端' : 'Client')} (${state.leaderClientId})${state.leaderVisible === false ? (zh ? ' · 暂不可见或离线' : ' · Hidden or offline') : ''}`);
+    if (state.leaderClientId) lines.push(`${zh ? '尺寸来源' : 'Size controller'}: ${devices[state.leaderDevice ?? ''] ?? (zh ? '客户端' : 'Client')} (${state.leaderClientId})${state.leaderRetained ? (zh ? ' · 保留已确认尺寸' : ' · Retaining confirmed size') : state.leaderVisible === false ? (zh ? ' · 暂不可见或离线' : ' · Hidden or offline') : ''}`);
     if (state.controlReason && reasons[state.controlReason]) lines.push(`${zh ? '选择原因' : 'Selection reason'}: ${reasons[state.controlReason]}`);
     return lines.join('\n');
 }

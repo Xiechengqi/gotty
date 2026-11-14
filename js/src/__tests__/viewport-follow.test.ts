@@ -11,6 +11,11 @@ beforeEach(() => {
 });
 afterEach(() => {cleanup.forEach(fn => fn()); document.body.innerHTML = ''; vi.unstubAllGlobals();});
 const render = () => {const callbacks = [...frames.values()]; frames.clear(); callbacks.forEach(fn => fn(0));};
+function touch(host: HTMLElement, type: string, x = 100, y = 100) {
+    const event = new Event(type, {bubbles: true});
+    Object.defineProperty(event, 'touches', {value: type === 'touchend' ? [] : [{clientX: x, clientY: y}]});
+    host.dispatchEvent(event);
+}
 
 function setup() {
     const host = document.createElement('div'), screen = document.createElement('div');
@@ -56,6 +61,61 @@ it('reveals the last shared-grid row and follows a cleared screen back to its ac
     expect(frames.size).toBe(1); render();
     expect(host.scrollTop).toBe(0);
     expect([term.cols, term.rows]).toEqual([160, 60]);
+});
+
+it('aligns normal live output to the browser bottom even when the cursor was already visible', () => {
+    const {host, active, emit} = setup(); render();
+    active.cursorY = 40; emit('parsed'); render();
+    expect(host.scrollTop).toBe(340);
+    active.type = 'alternate'; active.cursorY = 35; emit('parsed'); render();
+    expect(host.scrollTop).toBe(340); // Editors use minimal cursor revelation.
+});
+
+it('does not pause on a boundary touch and resumes after touch/inertial scrolling returns to live', () => {
+    const {host, emit, active} = setup(); render();
+    touch(host, 'touchstart'); touch(host, 'touchmove', 100, 40); touch(host, 'touchend');
+    emit('parsed'); render(); expect(host.dataset.viewportFollowing).toBe('true');
+    touch(host, 'touchstart'); touch(host, 'touchmove', 100, 180);
+    host.scrollTop = 300; host.dispatchEvent(new Event('scroll')); touch(host, 'touchend');
+    expect(host.dataset.viewportFollowing).toBe('false');
+    // Inertia continues after touchend; returning to live restores following.
+    host.scrollTop = 720; host.dispatchEvent(new Event('scroll'));
+    expect(host.dataset.viewportFollowing).toBe('true');
+    active.cursorY = 58; emit('parsed'); render(); expect(host.scrollTop).toBe(700);
+});
+
+it('does not interpret delayed resize/parser scroll events as history intent', () => {
+    const {host, active, emit, follow} = setup(); render();
+    touch(host, 'touchstart'); touch(host, 'touchmove', 100, 40); touch(host, 'touchend');
+    follow.changeLayout(() => {});
+    active.viewportY = 90; emit('scroll');
+    host.scrollTop = 650; host.dispatchEvent(new Event('scroll'));
+    expect(host.dataset.viewportFollowing).toBe('true');
+    render(); render(); expect(active.viewportY).toBe(active.baseY);
+    expect(host.scrollTop).toBe(720);
+});
+
+it('does not turn a hidden pane pointer release into history navigation', () => {
+    const {host, emit} = setup(); render();
+    touch(host, 'touchstart'); touch(host, 'touchmove', 100, 40);
+    Object.defineProperty(host, 'clientHeight', {value: 0, configurable: true});
+    document.dispatchEvent(new Event('pointerup')); touch(host, 'touchend'); render();
+    expect(host.dataset.viewportFollowing).toBe('true');
+    Object.defineProperty(host, 'clientHeight', {value: 480, configurable: true});
+    emit('render'); render(); expect(host.scrollTop).toBe(720);
+    expect(host.dataset.viewportFollowing).toBe('true');
+});
+
+it('uses visible content on initial hidden-cursor replay and publishes content-free diagnostics', () => {
+    const {host, active, term, follow, csi} = setup();
+    active.cursorY = 0;
+    (active as any).getLine = (line: number) => ({translateToString: () => line === active.baseY + 50 ? 'private terminal output' : ''});
+    csi.get('l')!([25]); render();
+    expect(host.scrollTop).toBe(540);
+    expect(follow.diagnostics()).toMatchObject({following: true, pauseReason: 'live', cursorVisible: false, buffer: 'normal', rows: 60, columns: 160});
+    expect(host.dataset.viewportState).not.toContain('private terminal output');
+    term.cols = 200; follow.changeLayout(() => {}); render();
+    expect(host.scrollTop).toBe(540);
 });
 
 it('holds manual history/selection positions while output arrives and resumes on deliberate input', () => {

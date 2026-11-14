@@ -106,10 +106,29 @@ func (sm *SessionManager) handleResizeEvent(client *Client, req clientResizeRequ
 	}
 	visible := req.Visible == nil || *req.Visible
 	previous := sm.clientSizes[client.id]
+	splitVisibility := req.Presence && req.PageVisible != nil && req.PaneVisible != nil
+	pageVisible, paneVisible := visible, visible
+	if splitVisibility {
+		pageVisible, paneVisible = *req.PageVisible, *req.PaneVisible
+		visible = visible && pageVisible && paneVisible
+	}
 	size := resizeDimensions{Columns: clamp(req.Columns, sm.minCols, sm.maxCols), Rows: clamp(req.Rows, sm.minRows, sm.maxRows),
 		DeviceClass: geometryDevice(req.DeviceClass), InputClass: geometryInput(req.InputClass), Presence: req.Presence,
+		SplitVisibility: splitVisibility, PageVisible: pageVisible, PaneVisible: paneVisible,
 		PixelRatio: req.PixelRatio, ViewportWidth: req.ViewportWidth, ViewportHeight: req.ViewportHeight, UpdatedAt: now, Visible: visible,
 		HiddenSince: previous.HiddenSince, StableSince: previous.StableSince}
+	if splitVisibility && !visible && previous.Columns > 0 && previous.Rows > 0 {
+		// A hidden pane renews only its existing lease. Its zero/stale layout
+		// cannot replace the last measured foreground viewport.
+		size.Columns, size.Rows = previous.Columns, previous.Rows
+		size.DeviceClass, size.InputClass = previous.DeviceClass, previous.InputClass
+		size.PixelRatio = previous.PixelRatio
+		size.ViewportWidth, size.ViewportHeight = previous.ViewportWidth, previous.ViewportHeight
+		if !pageVisible {
+			// Background reports must not keep an unattended page alive.
+			size.UpdatedAt = previous.UpdatedAt
+		}
+	}
 	changed := size.Columns != previous.Columns || size.Rows != previous.Rows || size.priority() != previous.priority()
 	if changed || size.StableSince.IsZero() || visible != previous.Visible {
 		size.StableSince = now
@@ -121,6 +140,9 @@ func (sm *SessionManager) handleResizeEvent(client *Client, req clientResizeRequ
 	}
 	sm.clientSizes[client.id] = size
 	if sm.resizePolicy == "adaptive" {
+		if client.id == sm.leaderClientID && (previous.Visible != size.Visible || previous.PageVisible != size.PageVisible || previous.PaneVisible != size.PaneVisible) {
+			sm.publishLocked(sm.terminalStateMessageLocked("visibility"), nil)
+		}
 		// Presence renewals must not postpone a pending resize or generate events.
 		if visible && client.id == sm.leaderClientID && (size.Columns != sm.activeCols || size.Rows != sm.activeRows) && (changed || sm.resizeDue.IsZero()) {
 			sm.resizeDue = now.Add(sm.resizeDebounce)

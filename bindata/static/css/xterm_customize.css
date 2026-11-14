@@ -242,3 +242,6 @@
     0%, 100% { opacity: 1; }
     50% { opacity: 0.3; }
 }
+
+#terminal[data-terminal-presented=false] .xterm-screen { visibility: hidden; }
+#terminal[data-terminal-presented=false] .xterm-helpers { visibility: visible; }

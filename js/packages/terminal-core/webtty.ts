@@ -120,6 +120,9 @@ export interface TerminalStatePayload {
     sizeControl?: boolean;
     leaderDevice?: string;
     leaderVisible?: boolean;
+    leaderPageVisible?: boolean;
+    leaderPaneVisible?: boolean;
+    leaderRetained?: boolean;
     controlReason?: string;
     resizeReason?: string;
 }
@@ -202,6 +205,7 @@ export class WebTTY {
     private replayGeneration = 0;
     private inputSender: InputSender;
     private adaptivePresence = false;
+    private pageActive = true;
 
     /*
      * The server's buffer size. If a single message exceeds this size, it will
@@ -259,17 +263,21 @@ export class WebTTY {
                 this.probeOrReconnect();
             }
         };
-        const onPageShow = () => this.probeOrReconnect();
+        const onPageShow = () => {this.pageActive = true; this.reportVisibility(); this.probeOrReconnect();};
+        const onPageHide = () => {this.pageActive = false; this.reportVisibility();};
         const onOnline = () => this.probeOrReconnect();
 
         document.addEventListener("visibilitychange", onVisibilityChange);
         window.addEventListener("pageshow", onPageShow);
+        window.addEventListener("pagehide", onPageHide);
+        document.addEventListener("freeze", onPageHide);
+        document.addEventListener("resume", onPageShow);
         window.addEventListener("online", onOnline);
 
         // Only adaptive servers opt in. Legacy leader/on_idle clients keep
         // their event-driven resize behavior. Focus changes are not visibility.
         const presence = setInterval(() => {
-            if (this.adaptivePresence && !document.hidden && (this.term.isVisible?.() ?? true)) this.reportVisibility();
+            if (this.adaptivePresence && this.pageActive && !document.hidden) this.reportVisibility();
         }, 3000);
 
         this.connectNow(true);
@@ -281,6 +289,9 @@ export class WebTTY {
             this.onDisconnect?.();
             document.removeEventListener("visibilitychange", onVisibilityChange);
             window.removeEventListener("pageshow", onPageShow);
+            window.removeEventListener("pagehide", onPageHide);
+            document.removeEventListener("freeze", onPageHide);
+            document.removeEventListener("resume", onPageShow);
             window.removeEventListener("online", onOnline);
             this.clearReconnectTimer();
             this.clearPingTimer();
@@ -608,12 +619,12 @@ export class WebTTY {
             this.sequence = 0;
             this.historyTruncated = payload.truncated === true;
         }
+        this.replayActive = true;
+        this.term.setReplayMode?.(true);
         if (payload.mode === 'snapshot' && payload.columns && payload.rows) {
             this.term.updateTerminalState?.({activeCols: payload.columns, activeRows: payload.rows,
                 policy: '', leaderClientId: '', reason: 'snapshot', sourceClientId: '', connectedClients: 0, resizeEnabled: true});
         }
-        this.replayActive = true;
-        this.term.setReplayMode?.(true);
 
         if (this.replayMode === "tail" || this.replayMode === "snapshot") {
             this.term.reset();
@@ -812,16 +823,23 @@ export class WebTTY {
     }
 
     private sendResizeTerminal(colmuns: number, rows: number, takeControl = false) {
+        // A hidden/unmeasurable new pane has no viewport to offer yet. Never
+        // elect xterm's default 80x24 grid as if it were a measured viewport.
+        if (!Number.isInteger(colmuns) || colmuns <= 0 || !Number.isInteger(rows) || rows <= 0) return;
         const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 0;
         const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
         const inputClass = window.matchMedia?.('(any-pointer: fine) and (any-hover: hover)').matches ? 'fine'
             : window.matchMedia?.('(pointer: coarse)').matches ? 'coarse' : 'unknown';
+        const pageVisible = this.pageActive && !document.hidden;
+        const paneVisible = this.term.isVisible?.() ?? true;
         this.sendIfOpen(
             msgResizeTerminal + JSON.stringify(
                 {
                     columns: colmuns,
-                    visible: !document.hidden && (this.term.isVisible?.() ?? true),
-                    takeControl,
+                    visible: pageVisible && paneVisible,
+                    pageVisible,
+                    paneVisible,
+                    takeControl: takeControl && pageVisible && paneVisible,
                     rows: rows,
                     deviceClass: this.getDeviceClass(viewportWidth, inputClass),
                     inputClass,

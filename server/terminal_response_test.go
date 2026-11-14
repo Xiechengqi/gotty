@@ -73,3 +73,20 @@ func TestAdaptiveExpiredOwnerCannotDuplicateTerminalReplies(t *testing.T) {
 		t.Fatal("query response unexpectedly changed geometry ownership")
 	}
 }
+
+func TestRetainedHiddenGeometryUsesVisibleQueryResponder(t *testing.T) {
+	sm, _ := adaptiveManager(t)
+	now := time.Now()
+	owner := addResizeClient(sm, "owner", "owner-browser-key", false)
+	viewer := addResizeClient(sm, "viewer", "viewer-browser-key", false)
+	sm.handleResizeEvent(owner, paneViewport(180, 50, "fine", true, true), now)
+	sm.handleResizeEvent(viewer, paneViewport(60, 20, "coarse", true, true), now)
+	sm.flushResize(now.Add(time.Second))
+	sm.handleResizeEvent(owner, paneViewport(180, 50, "fine", true, false), now.Add(time.Second))
+	if sm.acceptsTerminalResponseLocked(owner) || !sm.acceptsTerminalResponseLocked(viewer) {
+		t.Fatal("hidden geometry holder blocked or duplicated visible terminal replies")
+	}
+	if sm.leaderClientID != owner.id || sm.activeCols != 180 {
+		t.Fatal("query responder stole retained geometry")
+	}
+}

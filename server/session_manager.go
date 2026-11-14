@@ -49,34 +49,40 @@ type replaySnapshot struct {
 }
 
 type resizeDimensions struct {
-	Columns        int
-	Rows           int
-	DeviceClass    string
-	PixelRatio     float64
-	ViewportWidth  int
-	ViewportHeight int
-	UpdatedAt      time.Time
-	Visible        bool
-	InputClass     string
-	Presence       bool
-	HiddenSince    time.Time
-	StableSince    time.Time
+	Columns         int
+	Rows            int
+	DeviceClass     string
+	PixelRatio      float64
+	ViewportWidth   int
+	ViewportHeight  int
+	UpdatedAt       time.Time
+	Visible         bool
+	InputClass      string
+	Presence        bool
+	SplitVisibility bool
+	PageVisible     bool
+	PaneVisible     bool
+	HiddenSince     time.Time
+	StableSince     time.Time
 }
 
 type terminalState struct {
-	ActiveCols    int    `json:"activeCols"`
-	ActiveRows    int    `json:"activeRows"`
-	Policy        string `json:"policy"`
-	LeaderClient  string `json:"leaderClientId"`
-	Reason        string `json:"reason"`
-	SourceClient  string `json:"sourceClientId"`
-	Connected     int    `json:"connectedClients"`
-	ResizeEnabled bool   `json:"resizeEnabled"`
-	SizeControl   bool   `json:"sizeControl"`
-	LeaderDevice  string `json:"leaderDevice,omitempty"`
-	LeaderVisible bool   `json:"leaderVisible"`
-	ControlReason string `json:"controlReason,omitempty"`
-	ResizeReason  string `json:"resizeReason,omitempty"`
+	ActiveCols        int    `json:"activeCols"`
+	ActiveRows        int    `json:"activeRows"`
+	Policy            string `json:"policy"`
+	LeaderClient      string `json:"leaderClientId"`
+	Reason            string `json:"reason"`
+	SourceClient      string `json:"sourceClientId"`
+	Connected         int    `json:"connectedClients"`
+	ResizeEnabled     bool   `json:"resizeEnabled"`
+	SizeControl       bool   `json:"sizeControl"`
+	LeaderDevice      string `json:"leaderDevice,omitempty"`
+	LeaderVisible     bool   `json:"leaderVisible"`
+	LeaderPageVisible bool   `json:"leaderPageVisible"`
+	LeaderPaneVisible bool   `json:"leaderPaneVisible"`
+	LeaderRetained    bool   `json:"leaderRetained"`
+	ControlReason     string `json:"controlReason,omitempty"`
+	ResizeReason      string `json:"resizeReason,omitempty"`
 }
 
 type SessionManager struct {
@@ -469,6 +475,9 @@ func (sm *SessionManager) terminalStateLocked(reason string, now time.Time) term
 	if size, ok := sm.clientSizes[sm.leaderClientID]; ok {
 		state.LeaderDevice = size.DeviceClass
 		state.LeaderVisible = size.Visible && sm.leaderConnectedLocked() && (sm.resizePolicy != "adaptive" || size.fresh(now))
+		state.LeaderPageVisible = size.PageVisible
+		state.LeaderPaneVisible = size.PaneVisible
+		state.LeaderRetained = sm.resizePolicy == "adaptive" && !size.Visible && size.retainsGeometry(now) && sm.leaderConnectedLocked()
 	}
 	return state
 }

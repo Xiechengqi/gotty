@@ -92,20 +92,46 @@ it('stores only a stable browser identity and scopes it to the terminal', () => 
   expect(Object.values(sessionStorage).every(value => /^[a-f0-9]{32}$/.test(value))).toBe(true);
 });
 
-it('renews adaptive presence without treating blur as hidden or renewing hidden panes', () => {
+it('renews hidden internal panes but stops presence for background and frozen pages', () => {
   const p = setup();
   let visible = true;
   p.terminal.isVisible = () => visible;
   p.receive('8' + JSON.stringify({policy: 'adaptive', activeCols: 80, activeRows: 24}));
   const requests = () => p.sockets[0].send.mock.calls.filter(([frame]) => frame[0] === '3').map(([frame]) => JSON.parse(frame.slice(1)));
   window.dispatchEvent(new Event('blur')); vi.advanceTimersByTime(3000);
-  expect(requests()).toHaveLength(1); expect(requests()[0]).toMatchObject({presence: true, visible: true, takeControl: false});
+  expect(requests()).toHaveLength(1); expect(requests()[0]).toMatchObject({presence: true, visible: true, pageVisible: true, paneVisible: true, takeControl: false});
   visible = false; p.wt.reportVisibility(); vi.advanceTimersByTime(6000);
-  expect(requests()).toHaveLength(2); expect(requests()[1].visible).toBe(false);
+  expect(requests()).toHaveLength(4); expect(requests().at(-1)).toMatchObject({visible: false, pageVisible: true, paneVisible: false});
+  Object.defineProperty(document, 'hidden', {configurable: true, value: true});
+  document.dispatchEvent(new Event('visibilitychange'));
+  expect(requests().at(-1)).toMatchObject({visible: false, pageVisible: false, paneVisible: false});
+  let count = requests().length; vi.advanceTimersByTime(6000); expect(requests()).toHaveLength(count);
+  Object.defineProperty(document, 'hidden', {configurable: true, value: false});
   visible = true; p.wt.reportVisibility();
   expect(requests().at(-1).visible).toBe(true);
-  stops.pop()!(); const count = p.sockets[0].send.mock.calls.length;
+  document.dispatchEvent(new Event('freeze'));
+  expect(requests().at(-1).pageVisible).toBe(false);
+  count = requests().length; vi.advanceTimersByTime(3000); expect(requests()).toHaveLength(count);
+  document.dispatchEvent(new Event('resume')); expect(requests().at(-1).pageVisible).toBe(true);
+  stops.pop()!(); count = p.sockets[0].send.mock.calls.length;
   vi.advanceTimersByTime(6000); expect(p.sockets[0].send.mock.calls).toHaveLength(count);
+});
+
+it('does not report default or invalid geometry while a new pane awaits measurement', () => {
+  const p = setup(); p.terminal.info = () => ({columns: 0, rows: 0});
+  p.receive('8' + JSON.stringify({policy: 'adaptive', activeCols: 80, activeRows: 24}));
+  p.wt.reportVisibility(); vi.advanceTimersByTime(3000);
+  expect(p.sockets[0].send.mock.calls.filter(([frame]) => frame[0] === '3')).toHaveLength(0);
+  p.terminal.info = () => ({columns: 160, rows: 60}); p.wt.reportVisibility();
+  expect(JSON.parse(p.sockets[0].send.mock.calls.at(-1)![0].slice(1))).toMatchObject({columns: 160, rows: 60});
+});
+
+it('suppresses following before applying snapshot geometry', () => {
+  const p = setup(); const order: string[] = [];
+  p.terminal.setReplayMode = active => order.push(`replay:${active}`);
+  p.terminal.updateTerminalState = () => order.push('geometry');
+  p.receive(begin());
+  expect(order).toEqual(['replay:true', 'geometry']);
 });
 
 it('keeps legacy servers event-driven and classifies a landscape touch screen as mobile', () => {
