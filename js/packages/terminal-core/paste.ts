@@ -194,15 +194,78 @@ export class InputSender {
     }
 }
 
+const IMAGE_TYPES: Record<string, string> = {
+    'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp',
+    'image/tiff': 'tiff', 'image/tif': 'tiff',
+};
+
+export type PasteContent =
+    | {kind: 'text'; text: string}
+    | {kind: 'images'; files: File[]}
+    | {kind: 'empty'}
+    | {kind: 'rejected'; reason: 'mixed' | 'unsupported'};
+
+type ClipboardFile = {kind: string; type: string; name?: string; file: File | null};
+
+function imageExtension(type: string): string | undefined {
+    return IMAGE_TYPES[type.toLowerCase().split(';')[0].trim()];
+}
+
+function safeImageName(name: string): boolean {
+    const base = name.split(/[/\\]/).pop() ?? '';
+    // The server rejects any ".." , including one inside a basename.
+    return !!base && base !== '.' && !base.includes('..') && !/[\u0000]/.test(base) && !/[/\\]/.test(name);
+}
+
+// A screenshot often has no filename. Keep a name the browser already provided
+// when it is a single path segment; otherwise build a stable image name.
+export function imageFileName(file: File, stamp: Date): string {
+    const extension = imageExtension(file.type) ?? 'png';
+    const base = file.name.split(/[/\\]/).pop() ?? '';
+    if (safeImageName(file.name) && base.includes('.')) return base;
+    const pad = (value: number) => String(value).padStart(2, '0');
+    const when = `${stamp.getFullYear()}${pad(stamp.getMonth() + 1)}${pad(stamp.getDate())}-${pad(stamp.getHours())}${pad(stamp.getMinutes())}${pad(stamp.getSeconds())}`;
+    return `screenshot-${when}.${extension}`;
+}
+
+export function namedImageFile(file: File, stamp: Date): File {
+    const name = imageFileName(file, stamp);
+    return name === file.name ? file : new File([file], name, {type: file.type, lastModified: file.lastModified});
+}
+
+// Text wins, matching a normal terminal paste. Image bytes stay out of the PTY
+// and are returned for the existing file upload path. Files are read here
+// because a DataTransfer is only valid during the paste event.
+export function classifyPaste(text: string, items: ClipboardFile[]): PasteContent {
+    if (text) return {kind: 'text', text};
+    const files = items.filter(item => item.kind === 'file');
+    if (!files.length) return {kind: 'empty'};
+    const images = files.filter(item => imageExtension(item.type) && item.file);
+    if (images.length !== files.length) return images.length ? {kind: 'rejected', reason: 'mixed'} : {kind: 'rejected', reason: 'unsupported'};
+    return {kind: 'images', files: images.map(item => item.file!)};
+}
+
+export type PasteFiles = (files: File[]) => void;
+export type PasteNotice = (reason: 'empty' | 'mixed' | 'unsupported' | 'unavailable') => void;
+
 // Capture is necessary: xterm stops the native event during bubbling. This
 // preserves its newline and single bracket-pair semantics without accessing
 // private xterm internals or disabling protocol responses through disableStdin.
-export function bindPaste(element: HTMLElement, options: () => {enabled: boolean; bracketed: boolean}, send: (text: string, bracketed: boolean) => void): () => void {
+export function bindPaste(element: HTMLElement, options: () => {enabled: boolean; bracketed: boolean}, send: (text: string, bracketed: boolean) => void, onFiles?: PasteFiles, onNotice?: PasteNotice): () => void {
     const paste = (event: ClipboardEvent) => {
-        if (!event.clipboardData) return;
+        const data = event.clipboardData;
+        if (!data) return;
         const {enabled, bracketed} = options();
         event.preventDefault(); event.stopImmediatePropagation();
-        if (enabled) send(event.clipboardData.getData('text/plain'), bracketed);
+        const items = Array.from(data.items ?? [], item => ({kind: item.kind, type: item.type, file: item.kind === 'file' ? item.getAsFile() : null}));
+        // Some browsers expose a pasted screenshot only through clipboardData.files.
+        const files = items.some(item => item.kind === 'file') ? items : [...items, ...Array.from(data.files ?? [], file => ({kind: 'file', type: file.type, file}))];
+        const content = classifyPaste(data.getData('text/plain'), files);
+        if (enabled && content.kind === 'text') send(content.text, bracketed);
+        else if (content.kind === 'images') {
+            if (enabled && onFiles) onFiles(content.files.map(file => namedImageFile(file, new Date())));
+            else onNotice?.('unavailable');
+        } else if (content.kind === 'empty' || content.kind === 'rejected') onNotice?.(content.kind === 'rejected' ? content.reason : 'empty');
         const textarea = element.querySelector('textarea'); if (textarea) textarea.value = '';
     };
     element.addEventListener('paste', paste, true);

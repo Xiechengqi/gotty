@@ -682,9 +682,9 @@ export class GoTTYXterm {
     }
 
     // Upload file to server
-    private async uploadFile(file: File): Promise<void> {
+    private async uploadFile(file: File): Promise<boolean> {
         if (this.readOnly) {
-            return;
+            return false;
         }
 
         const fileName = file.name;
@@ -692,13 +692,17 @@ export class GoTTYXterm {
 
         if (fileSize === 0) {
             this.showMessage(`${fileName} is empty`, 3000);
-            return;
+            return false;
+        }
+        if (fileSize > 64 * 1024 * 1024) {
+            this.showMessage(`Maximum file size: 64 MiB`, 3000);
+            return false;
         }
 
         const chunkSize = this.getUploadChunkSize(fileName, fileSize);
         if (chunkSize <= 0) {
             this.showMessage(`Upload failed for ${fileName}: chunk too large`, 3000);
-            return;
+            return false;
         }
 
         const totalChunks = Math.ceil(fileSize / chunkSize);
@@ -730,10 +734,10 @@ export class GoTTYXterm {
 
             for (let chunk = 0; chunk < totalChunks; chunk++) {
                 // 检查是否已取消
-                if (this.currentUploadTask?.status === 'cancelled') {
+                if (uploadTask.status === 'cancelled') {
                     this.showMessage(`Upload cancelled: ${fileName}`, 3000);
                     this.hideUploadModal();
-                    return;
+                    return false;
                 }
 
                 const start = chunk * chunkSize;
@@ -782,11 +786,13 @@ export class GoTTYXterm {
             uploadTask.progress = 100;
             this.showMessage(`${fileName} uploaded successfully`, 3000);
             // 不自动关闭模态框，等待用户点击确定按钮
+            return true;
 
         } catch (error) {
             console.error('Upload failed:', error);
             uploadTask.status = 'error';
             this.showMessage(`Upload failed for ${fileName}`, 3000);
+            return false;
         }
     }
 
@@ -806,6 +812,7 @@ export class GoTTYXterm {
 
     // 隐藏上传模态框
     private hideUploadModal() {
+        const task = this.currentUploadTask;
         if (this.uploadModalContainer) {
             // 先调用模态框的 hide 方法，等待 Bootstrap 清理 backdrop
             const modalElem = this.uploadModalContainer.querySelector('.modal');
@@ -814,9 +821,10 @@ export class GoTTYXterm {
                 if (bsModal) {
                     // 监听隐藏完成事件
                     const onHidden = () => {
+                        modalElem.removeEventListener('hidden.bs.modal', onHidden);
+                        if (this.currentUploadTask !== task) return;
                         this.uploadModalContainer!.innerHTML = '';
                         this.currentUploadTask = null;
-                        modalElem.removeEventListener('hidden.bs.modal', onHidden);
                     };
                     modalElem.addEventListener('hidden.bs.modal', onHidden);
                     bsModal.hide();
@@ -826,7 +834,7 @@ export class GoTTYXterm {
             // 如果没有找到模态框实例，直接清理
             this.uploadModalContainer.innerHTML = '';
         }
-        this.currentUploadTask = null;
+        if (this.currentUploadTask === task) this.currentUploadTask = null;
     }
 
     // 取消上传
@@ -1130,6 +1138,26 @@ export class GoTTYXterm {
             this.inputTransformer?.('');
             this.inputCallbacks.forEach(callback => callback());
             sender(text, bracketed);
+        }, files => {
+            if (this.readOnly) return;
+            if (this.currentUploadTask?.status === 'uploading') {
+                this.showMessage('Another upload is running', 3000);
+                return;
+            }
+            void (async () => {
+                for (const file of files) {
+                    if (!await this.uploadFile(file)) return;
+                }
+            })();
+        }, reason => {
+            const message = reason === 'mixed'
+                ? 'Clipboard mixes images with other files. Use upload or drag-and-drop.'
+                : reason === 'unsupported'
+                    ? 'Clipboard file is not a supported image.'
+                    : reason === 'unavailable'
+                        ? 'Cannot save a pasted image in this terminal'
+                        : 'Clipboard has no text or image to paste.';
+            this.showMessage(message, 3000);
         });
     }
 

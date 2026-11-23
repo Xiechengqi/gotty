@@ -1,5 +1,5 @@
 import {afterEach, beforeEach, expect, it, vi} from 'vitest';
-import {InputSender, bindPaste, type PasteState} from '../../packages/terminal-core/paste';
+import {InputSender, bindPaste, classifyPaste, imageFileName, namedImageFile, type PasteState} from '../../packages/terminal-core/paste';
 
 let senders: InputSender[] = [];
 beforeEach(() => vi.useFakeTimers());
@@ -100,4 +100,54 @@ it('captures native paste once ahead of xterm bubbling and respects disabled inp
     expect(paste().defaultPrevented).toBe(true); expect(send).toHaveBeenCalledExactlyOnceWith('external', true); expect(bubble).not.toHaveBeenCalled();
     enabled = false; paste(); expect(send).toHaveBeenCalledTimes(1);
     unbind(); paste(); expect(bubble).toHaveBeenCalledTimes(1);
+});
+
+function clipboardItem(kind: string, type: string, file: File | null = null) {
+    return {kind, type, file};
+}
+
+it('classifies text ahead of images and keeps image bytes out of a paste', () => {
+    const png = new File([Uint8Array.from([137, 80, 78, 71])], '', {type: 'image/png'});
+    expect(classifyPaste('hello', [clipboardItem('file', 'image/png', png)])).toEqual({kind: 'text', text: 'hello'});
+    expect(classifyPaste('', [clipboardItem('file', 'image/png', png)])).toEqual({kind: 'images', files: [png]});
+    expect(classifyPaste('', [])).toEqual({kind: 'empty'});
+    expect(classifyPaste('', [clipboardItem('file', 'image/png', png), clipboardItem('file', 'text/plain', new File(['x'], 'notes.txt'))])).toEqual({kind: 'rejected', reason: 'mixed'});
+    expect(classifyPaste('', [clipboardItem('file', 'application/pdf', new File(['x'], 'a.pdf'))])).toEqual({kind: 'rejected', reason: 'unsupported'});
+    expect(imageFileName(png, new Date(2026, 10, 23, 4, 5, 6))).toBe('screenshot-20261123-040506.png');
+    expect(imageFileName(new File(['x'], 'image.png', {type: 'image/png'}), new Date())).toBe('image.png');
+    expect(imageFileName({name: 'foo..bar.png', type: 'image/png'} as File, new Date(2026, 0, 2, 3, 4, 5))).toBe('screenshot-20260102-030405.png');
+    expect(namedImageFile(new File(['x'], '', {type: 'image/jpeg'}), new Date(2026, 0, 2, 3, 4, 5)).name).toBe('screenshot-20260102-030405.jpg');
+    expect(imageFileName(new File(['x'], '', {type: 'image/tiff'}), new Date(2026, 0, 2, 3, 4, 5))).toBe('screenshot-20260102-030405.tiff');
+});
+
+it('routes a screenshot paste to upload files and leaves the text sender untouched', () => {
+    const root = document.createElement('div');
+    const send = vi.fn(), files = vi.fn(), notice = vi.fn();
+    const png = new File([Uint8Array.from([1, 2, 3])], '', {type: 'image/png'});
+    const unbind = bindPaste(root, () => ({enabled: true, bracketed: true}), send, files, notice);
+    const event = new Event('paste', {bubbles: true, cancelable: true});
+    Object.defineProperty(event, 'clipboardData', {value: {getData: () => '', items: [{kind: 'file', type: 'image/png', getAsFile: () => png}], files: []}});
+    root.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(true);
+    expect(send).not.toHaveBeenCalled();
+    expect(files).toHaveBeenCalledOnce();
+    expect(files.mock.calls[0][0][0].name).toMatch(/^screenshot-\d{8}-\d{6}\.png$/);
+    expect(files.mock.calls[0][0][0].type).toBe('image/png');
+    const empty = new Event('paste', {bubbles: true, cancelable: true});
+    Object.defineProperty(empty, 'clipboardData', {value: {getData: () => '', items: [], files: []}});
+    root.dispatchEvent(empty);
+    expect(notice).toHaveBeenCalledWith('empty');
+    unbind();
+});
+
+it('reports an image paste when the terminal cannot save files', () => {
+    const root = document.createElement('div'), notice = vi.fn(), files = vi.fn();
+    const png = new File([Uint8Array.from([1])], 'image.png', {type: 'image/png'});
+    const unbind = bindPaste(root, () => ({enabled: false, bracketed: false}), vi.fn(), files, notice);
+    const event = new Event('paste', {bubbles: true, cancelable: true});
+    Object.defineProperty(event, 'clipboardData', {value: {getData: () => '', items: [], files: [png]}});
+    root.dispatchEvent(event);
+    expect(files).not.toHaveBeenCalled();
+    expect(notice).toHaveBeenCalledWith('unavailable');
+    unbind();
 });
